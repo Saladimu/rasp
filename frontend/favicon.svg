@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="My Home Server">
+  <defs>
+    <linearGradient id="tile" x1="6" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#15233a"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="8" y1="6" x2="24" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#tile)"/>
+  <rect x="1.15" y="1.15" width="29.7" height="29.7" rx="6.85" fill="none" stroke="#5eead4" stroke-opacity=".28" stroke-width="1.15"/>
+  <path d="M8 14.2 16 7.4 24 14.2" fill="none" stroke="url(#mark)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="10" y="13.6" width="12" height="11.2" rx="2.1" fill="#0b1220" stroke="url(#mark)" stroke-width="1.7"/>
+  <path d="M12.6 17.2h6.8M12.6 20.2h6.8" fill="none" stroke="#5eead4" stroke-width="1.35" stroke-linecap="round"/>
+  <circle cx="21.3" cy="23.15" r="1.35" fill="#34d399"/>
+</svg>

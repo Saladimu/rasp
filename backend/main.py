@@ -102,7 +102,17 @@ def validate_payload(payload: AppPayload) -> None:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def next_display_order(kind: str) -> int:
+    with db_session() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(display_order), 0) AS max_order FROM apps WHERE kind = ?",
+            (kind,),
+        ).fetchone()
+    return int(row["max_order"] or 0) + 1
+
+
 def insert_entry(payload: AppPayload) -> dict[str, Any]:
+    display_order = payload.display_order if payload.display_order > 0 else next_display_order(payload.kind)
     with db_session() as conn:
         cursor = conn.execute(
             """
@@ -120,7 +130,7 @@ def insert_entry(payload: AppPayload) -> dict[str, Any]:
                 payload.health_method,
                 payload.health_port,
                 1 if payload.monitoring_enabled else 0,
-                payload.display_order,
+                display_order,
                 payload.kind,
                 1 if payload.visible else 0,
             ),

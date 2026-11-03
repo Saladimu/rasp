@@ -1,4 +1,6 @@
 let csrfToken = "";
+let lastApps = [];
+let lastWebsites = [];
 
 function show(el, on) {
   el.classList.toggle("hidden", !on);
@@ -49,7 +51,9 @@ function fillForm(entry, kind) {
   form.health_url.value = entry?.health_url || "";
   form.health_method.value = entry?.health_method || (kind === "website" ? "https" : "http");
   form.health_port.value = entry?.health_port || "";
-  form.display_order.value = entry?.display_order || 0;
+  form.display_order.value = entry?.id
+    ? (entry.display_order || 0)
+    : nextDisplayOrder(kind === "website" ? lastWebsites : lastApps);
   form.monitoring_enabled.checked = entry?.monitoring_enabled !== false;
   form.visible.checked = entry?.visible !== false;
   const noun = kind === "website" ? "website" : "application";
@@ -57,6 +61,10 @@ function fillForm(entry, kind) {
   document.getElementById("url-label").firstChild.textContent = kind === "website" ? "Website URL " : "Application URL ";
   form.url.placeholder = kind === "website" ? "https://saladimu.my.id" : "http://127.0.0.1:8081";
   setAlert("form-error", "");
+}
+
+function nextDisplayOrder(items) {
+  return (items || []).reduce((max, item) => Math.max(max, Number(item.display_order) || 0), 0) + 1;
 }
 
 function renderTable(targetId, items, kind) {
@@ -86,8 +94,10 @@ async function loadAdminLists() {
     api("/api/admin/apps"),
     api("/api/admin/websites")
   ]);
-  renderTable("app-table", appsData.apps, "application");
-  renderTable("website-table", sitesData.websites, "website");
+  lastApps = appsData.apps || [];
+  lastWebsites = sitesData.websites || [];
+  renderTable("app-table", lastApps, "application");
+  renderTable("website-table", lastWebsites, "website");
 }
 
 function escapeHtml(value) {
