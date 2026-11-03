@@ -69,24 +69,17 @@ function renderClock() {
   setText("clock", now.toLocaleString());
 }
 
-async function loadServerInfo() {
-  try {
-    const res = await fetch("/api/server-info", { cache: "no-store" });
-    if (!res.ok) throw new Error("offline");
-    const info = await res.json();
-    setText("dashboard-name", info.dashboard_name);
-    setText("dashboard-subtitle", info.dashboard_subtitle);
-    setText("stat-hostname", info.hostname);
-    setText("stat-cpu", info.cpu);
-    setText("stat-ram", info.ram);
-    setText("stat-disk", info.disk);
-    setText("stat-uptime", info.uptime);
-    document.getElementById("server-status").textContent = "Online";
-    document.getElementById("server-dot").className = "dot online";
-  } catch (_err) {
-    document.getElementById("server-status").textContent = "Offline";
-    document.getElementById("server-dot").className = "dot offline";
-  }
+function applyServerInfo(info) {
+  if (!info) return;
+  setText("dashboard-name", info.dashboard_name);
+  setText("dashboard-subtitle", info.dashboard_subtitle);
+  setText("stat-hostname", info.hostname);
+  setText("stat-cpu", info.cpu);
+  setText("stat-ram", info.ram);
+  setText("stat-disk", info.disk);
+  setText("stat-uptime", info.uptime);
+  document.getElementById("server-status").textContent = "Online";
+  document.getElementById("server-dot").className = "dot online";
 }
 
 function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
@@ -125,30 +118,39 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/'/g, "&#39;");
 }
 
+let pendingRetry = 0;
+
 async function loadDashboard(refresh = false) {
-  const query = refresh ? "?refresh=true" : "";
-  const [appsRes, appStatusRes, sitesRes, siteStatusRes] = await Promise.all([
-    fetch("/api/apps", { cache: "no-store" }),
-    fetch(`/api/status${query}`, { cache: "no-store" }),
-    fetch("/api/websites", { cache: "no-store" }),
-    fetch(`/api/websites/status${query}`, { cache: "no-store" })
-  ]);
-  const appsData = await appsRes.json();
-  const appStatusData = await appStatusRes.json();
-  const sitesData = await sitesRes.json();
-  const siteStatusData = await siteStatusRes.json();
-  renderCards("app-grid", appsData.apps || [], appStatusData.statuses || [], "No applications registered yet.", "Open Application");
-  renderCards("website-grid", sitesData.websites || [], siteStatusData.statuses || [], "No personal websites registered yet.", "Open Website");
+  try {
+    if (refresh) {
+      await Promise.all([
+        fetch("/api/status?refresh=true", { cache: "no-store" }),
+        fetch("/api/websites/status?refresh=true", { cache: "no-store" })
+      ]);
+    }
+    const res = await fetch("/api/dashboard", { cache: "no-store" });
+    if (!res.ok) throw new Error("offline");
+    const data = await res.json();
+    applyServerInfo(data.server);
+    renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
+    renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
+    const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
+      .some((item) => item.status === "unknown" && item.message === "Waiting for first check");
+    if (waiting) {
+      clearTimeout(pendingRetry);
+      pendingRetry = setTimeout(() => loadDashboard(false), 1200);
+    }
+  } catch (_err) {
+    document.getElementById("server-status").textContent = "Offline";
+    document.getElementById("server-dot").className = "dot offline";
+  }
 }
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
   loadDashboard(true);
-  loadServerInfo();
 });
 
 renderClock();
 setInterval(renderClock, 1000);
-loadServerInfo();
 loadDashboard();
-setInterval(() => loadDashboard(false), 45000);
-setInterval(loadServerInfo, 30000);
+setInterval(() => loadDashboard(false), 30000);

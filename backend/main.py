@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Up
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .auth import (
     CSRF_COOKIE_NAME,
@@ -23,7 +24,7 @@ from .auth import (
 )
 from .config import DATA_DIR, settings
 from .database import db_session, init_db, row_to_dict
-from .health import cache_for, check_apps
+from .health import cache_for, check_apps, close_http_client, empty_status
 from .models import AppPayload, LoginRequest, ReorderPayload, VisibilityPayload
 from .seed import bootstrap
 from .serverinfo import collect_server_info
@@ -207,9 +208,13 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    await close_http_client()
 
 
 app = FastAPI(title="Home Server Dashboard", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+STATIC_CACHEABLE = (".css", ".js", ".svg", ".ico", ".png", ".woff", ".woff2", ".jpg", ".jpeg", ".webp")
 
 
 @app.middleware("http")
@@ -219,7 +224,13 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    response.headers["Cache-Control"] = "no-store"
+    path = request.url.path
+    if path.startswith("/static/") and path.lower().endswith(STATIC_CACHEABLE):
+        response.headers["Cache-Control"] = "public, max-age=300"
+    elif path.startswith("/icons/"):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
@@ -238,21 +249,39 @@ async def security_headers(request: Request, call_next):
 
 async def collect_status(kind: str | None = None, refresh: bool = False) -> list[dict[str, Any]]:
     rows = fetch_apps(kind, visible_only=True)
+    if refresh and rows:
+        await check_apps(rows)
+    return statuses_for(rows)
+
+
+def statuses_for(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     results = []
-    pending = []
     for row in rows:
-        cache = cache_for(row.get("kind") or "application")
-        cached = cache.get(row["id"])
-        if refresh or not cached:
-            pending.append(row)
-        else:
-            results.append(cached)
-    if pending:
-        probed = await check_apps(pending)
-        results.extend(probed)
-    order = {row["id"]: index for index, row in enumerate(rows)}
-    results.sort(key=lambda item: order.get(item["id"], 0))
+        kind_name = row.get("kind") or "application"
+        cached = cache_for(kind_name).get(row["id"])
+        results.append(cached or empty_status(row["id"], "Waiting for first check", kind_name))
     return results
+
+
+@app.get("/api/dashboard")
+async def dashboard() -> dict[str, Any]:
+    rows = fetch_apps(visible_only=True)
+    app_rows = [row for row in rows if (row.get("kind") or "application") != "website"]
+    site_rows = [row for row in rows if row.get("kind") == "website"]
+    missing = [
+        row
+        for row in rows
+        if row["id"] not in cache_for(row.get("kind") or "application")
+    ]
+    if missing:
+        asyncio.create_task(check_apps(missing))
+    return {
+        "server": collect_server_info(),
+        "apps": [public_app(row) for row in app_rows],
+        "websites": [public_app(row) for row in site_rows],
+        "statuses": statuses_for(app_rows),
+        "website_statuses": statuses_for(site_rows),
+    }
 
 
 @app.get("/api/apps")

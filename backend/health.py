@@ -10,6 +10,39 @@ from .config import settings
 
 STATUS_CACHE: dict[int, dict[str, Any]] = {}
 WEBSITE_STATUS_CACHE: dict[int, dict[str, Any]] = {}
+PROBE_TIMEOUT = 2.0
+CONNECT_TIMEOUT = 1.0
+PROBE_HEADERS = {"User-Agent": "HomeServerDashboard/1.0", "Accept": "*/*"}
+
+_http_client: httpx.AsyncClient | None = None
+_probe_lock: asyncio.Lock | None = None
+
+
+def http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(PROBE_TIMEOUT, connect=CONNECT_TIMEOUT),
+            follow_redirects=False,
+            trust_env=False,
+            verify=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _http_client
+
+
+def probe_lock() -> asyncio.Lock:
+    global _probe_lock
+    if _probe_lock is None:
+        _probe_lock = asyncio.Lock()
+    return _probe_lock
+
+
+async def close_http_client() -> None:
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
 
 
 def cache_for(kind: str) -> dict[int, dict[str, Any]]:
@@ -28,25 +61,27 @@ def empty_status(app_id: int, reason: str = "Unknown", kind: str = "application"
     }
 
 
-async def check_http(url: str, timeout: float = 4.0, follow_redirects: bool = False) -> dict[str, Any]:
+async def check_http(url: str, timeout: float = PROBE_TIMEOUT, follow_redirects: bool = False) -> dict[str, Any]:
     started = time.perf_counter()
-    async with httpx.AsyncClient(
+    async with http_client().stream(
+        "GET",
+        url,
         timeout=timeout,
         follow_redirects=follow_redirects,
-        trust_env=False,
-        verify=True,
-    ) as client:
-        response = await client.get(url)
+        headers=PROBE_HEADERS,
+    ) as response:
+        status_code = response.status_code
+        await response.aclose()
     latency = round((time.perf_counter() - started) * 1000)
-    online = 200 <= response.status_code < 400
+    online = 200 <= status_code < 400
     return {
         "status": "online" if online else "offline",
         "latency_ms": latency,
-        "message": f"HTTP {response.status_code}",
+        "message": f"HTTP {status_code}",
     }
 
 
-async def check_tcp(host: str, port: int, timeout: float = 4.0) -> dict[str, Any]:
+async def check_tcp(host: str, port: int, timeout: float = CONNECT_TIMEOUT) -> dict[str, Any]:
     started = time.perf_counter()
 
     def _connect() -> None:
@@ -127,4 +162,5 @@ async def check_app(app: dict[str, Any]) -> dict[str, Any]:
 async def check_apps(apps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not apps:
         return []
-    return await asyncio.gather(*(check_app(app) for app in apps))
+    async with probe_lock():
+        return await asyncio.gather(*(check_app(app) for app in apps))
