@@ -24,8 +24,10 @@ from .auth import (
 )
 from .config import DATA_DIR, settings
 from .database import db_session, init_db, row_to_dict
+from .alerts import process_alerts, public_alert_settings, save_alert_settings, send_test_alert
 from .health import cache_for, check_apps, close_http_client, empty_status
-from .models import AppPayload, LoginRequest, ReorderPayload, VisibilityPayload
+from .history import delete_history, overall_uptime, summaries_for
+from .models import AlertSettingsPayload, AppPayload, LoginRequest, ReorderPayload, VisibilityPayload
 from .seed import bootstrap
 from .serverinfo import collect_server_info
 from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_app_url, validate_health_target
@@ -182,6 +184,7 @@ def delete_entry(app_id: int, kind: str) -> None:
             raise HTTPException(status_code=404, detail="Entry not found.")
         conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
     cache_for(kind).pop(app_id, None)
+    delete_history(app_id)
 
 
 @asynccontextmanager
@@ -194,7 +197,8 @@ async def lifespan(app: FastAPI):
         interval = max(30, min(settings.health_interval_seconds, 60))
         while not stop_event.is_set():
             apps = fetch_apps()
-            await check_apps(apps)
+            results = await check_apps(apps)
+            await process_alerts(apps, results)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=interval)
             except asyncio.TimeoutError:
@@ -227,13 +231,13 @@ async def security_headers(request: Request, call_next):
     path = request.url.path
     if path.startswith("/static/") and path.lower().endswith(STATIC_CACHEABLE):
         response.headers["Cache-Control"] = "public, max-age=300"
-    elif path.startswith("/icons/"):
+    elif path in {"/manifest.json", "/sw.js"} or path.startswith("/icons/"):
         response.headers["Cache-Control"] = "public, max-age=86400"
     else:
         response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self'; "
-        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+        "script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'"
     )
     if not request.cookies.get(CSRF_COOKIE_NAME) and current_user(request):
         response.set_cookie(
@@ -250,8 +254,9 @@ async def security_headers(request: Request, call_next):
 async def collect_status(kind: str | None = None, refresh: bool = False) -> list[dict[str, Any]]:
     rows = fetch_apps(kind, visible_only=True)
     if refresh and rows:
-        await check_apps(rows)
-    return statuses_for(rows)
+        results = await check_apps(rows)
+        await process_alerts(rows, results)
+    return with_history(statuses_for(rows))
 
 
 def statuses_for(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -261,6 +266,29 @@ def statuses_for(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cached = cache_for(kind_name).get(row["id"])
         results.append(cached or empty_status(row["id"], "Waiting for first check", kind_name))
     return results
+
+
+def with_history(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries = summaries_for([item["id"] for item in items])
+    decorated = []
+    for item in items:
+        payload = dict(item)
+        hist = summaries.get(item["id"], {})
+        payload["uptime_24h"] = hist.get("uptime_24h")
+        payload["uptime_7d"] = hist.get("uptime_7d")
+        payload["avg_latency_ms"] = hist.get("avg_latency_ms")
+        payload["sparkline"] = hist.get("sparkline") or []
+        decorated.append(payload)
+    return decorated
+
+
+def count_states(items: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = {"online": 0, "offline": 0, "unknown": 0}
+    for item in items:
+        state = item.get("status") if item.get("status") in counts else "unknown"
+        counts[state] += 1
+    counts["total"] = len(items)
+    return counts
 
 
 @app.get("/api/dashboard")
@@ -275,12 +303,21 @@ async def dashboard() -> dict[str, Any]:
     ]
     if missing:
         asyncio.create_task(check_apps(missing))
+    app_statuses = with_history(statuses_for(app_rows))
+    site_statuses = with_history(statuses_for(site_rows))
+    combined = app_statuses + site_statuses
+    summary = count_states(combined)
+    summary["uptime_24h"] = overall_uptime(
+        {item["id"]: item for item in combined}
+    )
+    summary["alerts_enabled"] = public_alert_settings()["alert_enabled"]
     return {
         "server": collect_server_info(),
+        "summary": summary,
         "apps": [public_app(row) for row in app_rows],
         "websites": [public_app(row) for row in site_rows],
-        "statuses": statuses_for(app_rows),
-        "website_statuses": statuses_for(site_rows),
+        "statuses": app_statuses,
+        "website_statuses": site_statuses,
     }
 
 
@@ -445,6 +482,30 @@ def set_website_visibility(
     return {"website": set_visibility(app_id, "website", payload.visible)}
 
 
+@app.get("/api/admin/alerts")
+def get_alert_settings(_: str = Depends(require_admin)) -> dict[str, Any]:
+    return public_alert_settings()
+
+
+@app.put("/api/admin/alerts")
+def update_alert_settings(
+    payload: AlertSettingsPayload,
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return save_alert_settings(payload.model_dump())
+    except HealthCheckTargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/alerts/test")
+async def test_alert_settings(_: str = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return await send_test_alert()
+    except HealthCheckTargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/admin/icons")
 async def upload_icon(
     file: UploadFile = File(...),
@@ -489,6 +550,16 @@ def admin_page():
 @app.get("/admin.html")
 def admin_html():
     return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+@app.get("/manifest.json")
+def manifest_file():
+    return FileResponse(FRONTEND_DIR / "manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse(FRONTEND_DIR / "sw.js", media_type="text/javascript")
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

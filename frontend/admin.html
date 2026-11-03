@@ -7,7 +7,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <div class="shell">
@@ -83,6 +85,37 @@
             </thead>
             <tbody id="website-table"></tbody>
           </table>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <div>
+              <h2 class="section-title">Down Alerts</h2>
+              <p class="muted">Telegram or webhook after consecutive failed checks. Quiet hours skip noise.</p>
+            </div>
+          </div>
+          <form class="form alert-form" id="alert-form">
+            <div class="alert" id="alert-error"></div>
+            <div class="alert success" id="alert-ok"></div>
+            <label class="check"><input name="alert_enabled" type="checkbox"> Enable down alerts</label>
+            <div class="row">
+              <label>Telegram bot token <input name="telegram_bot_token" type="password" placeholder="Leave blank to keep current" autocomplete="off"></label>
+              <label>Telegram chat ID <input name="telegram_chat_id" placeholder="123456789"></label>
+            </div>
+            <label>Webhook URL <input name="webhook_url" placeholder="https://example.com/hooks/home-server"></label>
+            <div class="row">
+              <label>Fail threshold <input name="fail_threshold" type="number" min="1" max="10" value="2"></label>
+              <label>Timezone <input name="timezone" placeholder="UTC"></label>
+            </div>
+            <div class="row">
+              <label>Quiet start <input name="quiet_start" placeholder="23:00"></label>
+              <label>Quiet end <input name="quiet_end" placeholder="07:00"></label>
+            </div>
+            <div class="actions">
+              <button class="btn" type="submit">Save Alerts</button>
+              <button class="btn secondary" id="alert-test-btn" type="button">Send Test</button>
+            </div>
+          </form>
         </section>
       </div>
     </div>
@@ -173,6 +206,6 @@
       </form>
     </div>
   </div>
-  <script src="/static/admin.js?v=2"></script>
+  <script src="/static/admin.js?v=3"></script>
 </body>
 </html>

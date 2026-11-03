@@ -108,3 +108,26 @@ class ReorderPayload(BaseModel):
 
 class VisibilityPayload(BaseModel):
     visible: bool
+
+
+class AlertSettingsPayload(BaseModel):
+    alert_enabled: bool = False
+    telegram_bot_token: Optional[str] = Field(default=None, max_length=200)
+    telegram_chat_id: str = Field(default="", max_length=64)
+    webhook_url: str = Field(default="", max_length=500)
+    fail_threshold: int = Field(default=2, ge=1, le=10)
+    quiet_start: str = Field(default="", max_length=5)
+    quiet_end: str = Field(default="", max_length=5)
+    timezone: str = Field(default="UTC", max_length=64)
+
+    @field_validator("telegram_chat_id", "webhook_url", "quiet_start", "quiet_end", "timezone")
+    @classmethod
+    def strip_alert_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("telegram_bot_token")
+    @classmethod
+    def strip_token(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.strip()

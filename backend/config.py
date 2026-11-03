@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     freellmapi_url: str = "http://127.0.0.1:8082"
     telegram_bot_url: str = "http://127.0.0.1:8083"
     personal_website_url: str = "https://saladimu.my.id"
+    alert_enabled: bool = False
+    alert_telegram_bot_token: str = ""
+    alert_telegram_chat_id: str = ""
+    alert_webhook_url: str = ""
+    alert_fail_threshold: int = 2
+    alert_quiet_start: str = ""
+    alert_quiet_end: str = ""
+    alert_timezone: str = "UTC"
 
 
 settings = Settings()

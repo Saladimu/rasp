@@ -7,6 +7,7 @@ import httpx
 
 from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_health_target
 from .config import settings
+from .history import record_results
 
 STATUS_CACHE: dict[int, dict[str, Any]] = {}
 WEBSITE_STATUS_CACHE: dict[int, dict[str, Any]] = {}
@@ -163,4 +164,6 @@ async def check_apps(apps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not apps:
         return []
     async with probe_lock():
-        return await asyncio.gather(*(check_app(app) for app in apps))
+        results = await asyncio.gather(*(check_app(app) for app in apps))
+    record_results(results)
+    return results

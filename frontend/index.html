@@ -4,10 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Home Server</title>
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <div class="shell">
@@ -22,10 +26,19 @@
       <div class="meta">
         <div class="chip" id="clock">--</div>
         <div class="chip"><span class="dot unknown" id="server-dot"></span><span id="server-status">Unknown</span></div>
+        <button class="btn secondary hidden" id="install-btn" type="button">Install App</button>
         <button class="btn secondary" id="refresh-btn" type="button">Refresh Status</button>
         <a class="btn" href="/admin">Admin Login</a>
       </div>
     </header>
+
+    <section class="ribbon" id="status-ribbon">
+      <div class="ribbon-item"><span>Online</span><strong id="sum-online">0</strong></div>
+      <div class="ribbon-item"><span>Offline</span><strong id="sum-offline">0</strong></div>
+      <div class="ribbon-item"><span>Unknown</span><strong id="sum-unknown">0</strong></div>
+      <div class="ribbon-item"><span>24h Uptime</span><strong id="sum-uptime">Not Available</strong></div>
+      <div class="ribbon-item"><span>Alerts</span><strong id="sum-alerts">Off</strong></div>
+    </section>
 
     <section class="stats">
       <div class="stat"><span>Hostname</span><strong id="stat-hostname">Not Available</strong></div>
@@ -51,6 +64,6 @@
     </div>
     <section class="grid" id="website-grid"></section>
   </div>
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

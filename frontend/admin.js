@@ -117,11 +117,28 @@ function closeModal() {
   show(document.getElementById("modal"), false);
 }
 
+async function loadAlertSettings() {
+  const data = await api("/api/admin/alerts");
+  const form = document.getElementById("alert-form");
+  form.alert_enabled.checked = Boolean(data.alert_enabled);
+  form.telegram_bot_token.value = "";
+  form.telegram_bot_token.placeholder = data.telegram_configured ? "Saved. Leave blank to keep." : "Leave blank to keep current";
+  form.telegram_chat_id.value = data.telegram_chat_id || "";
+  form.webhook_url.value = data.webhook_url || "";
+  form.fail_threshold.value = data.fail_threshold || 2;
+  form.timezone.value = data.timezone || "UTC";
+  form.quiet_start.value = data.quiet_start || "";
+  form.quiet_end.value = data.quiet_end || "";
+  setAlert("alert-error", "");
+  setAlert("alert-ok", "");
+}
+
 async function enterAdmin(username) {
   document.getElementById("admin-user").textContent = username;
   show(document.getElementById("login-panel"), false);
   show(document.getElementById("admin-panel"), true);
   await loadAdminLists();
+  await loadAlertSettings();
 }
 
 document.getElementById("login-form").addEventListener("submit", async (event) => {
@@ -237,6 +254,41 @@ document.getElementById("app-form").addEventListener("submit", async (event) => 
     await loadAdminLists();
   } catch (err) {
     setAlert("form-error", err.message);
+  }
+});
+
+document.getElementById("alert-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api("/api/admin/alerts", {
+      method: "PUT",
+      body: JSON.stringify({
+        alert_enabled: form.alert_enabled.checked,
+        telegram_bot_token: form.telegram_bot_token.value || null,
+        telegram_chat_id: form.telegram_chat_id.value,
+        webhook_url: form.webhook_url.value,
+        fail_threshold: Number(form.fail_threshold.value || 2),
+        quiet_start: form.quiet_start.value,
+        quiet_end: form.quiet_end.value,
+        timezone: form.timezone.value || "UTC"
+      })
+    });
+    await loadAlertSettings();
+    setAlert("alert-ok", "Alert settings saved.");
+  } catch (err) {
+    setAlert("alert-error", err.message);
+  }
+});
+
+document.getElementById("alert-test-btn").addEventListener("click", async () => {
+  try {
+    await api("/api/admin/alerts/test", { method: "POST", body: JSON.stringify({}) });
+    setAlert("alert-ok", "Test alert sent.");
+    setAlert("alert-error", "");
+  } catch (err) {
+    setAlert("alert-error", err.message);
+    setAlert("alert-ok", "");
   }
 });
 

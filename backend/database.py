@@ -67,8 +67,30 @@ def init_db() -> None:
                 value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS health_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                latency_ms INTEGER,
+                checked_at TEXT NOT NULL,
+                message TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS alert_state (
+                app_id INTEGER PRIMARY KEY,
+                consecutive_fails INTEGER NOT NULL DEFAULT 0,
+                last_status TEXT NOT NULL DEFAULT '',
+                last_event TEXT NOT NULL DEFAULT '',
+                pending INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time
                 ON login_attempts(ip, attempted_at);
+            CREATE INDEX IF NOT EXISTS idx_health_history_app_time
+                ON health_history(app_id, checked_at);
             """
         )
         columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)").fetchall()}

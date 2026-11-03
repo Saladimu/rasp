@@ -82,6 +82,37 @@ function applyServerInfo(info) {
   document.getElementById("server-dot").className = "dot online";
 }
 
+function applySummary(summary) {
+  const data = summary || {};
+  setText("sum-online", String(data.online || 0));
+  setText("sum-offline", String(data.offline || 0));
+  setText("sum-unknown", String(data.unknown || 0));
+  setText("sum-uptime", data.uptime_24h != null ? `${data.uptime_24h}%` : "Not Available");
+  setText("sum-alerts", data.alerts_enabled ? "On" : "Off");
+}
+
+function sparklineSvg(points) {
+  const values = (points || []).slice(-36);
+  if (!values.length) {
+    return `<svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none"><path d="M0 14 H100" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.35"/></svg>`;
+  }
+  const width = 100;
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+  const coords = values.map((value, index) => {
+    const x = Math.round(index * step);
+    if (value === 1) return `${x},6`;
+    if (value === 0) return `${x},22`;
+    return `${x},14`;
+  });
+  return `<svg class="sparkline" viewBox="0 0 100 28" preserveAspectRatio="none"><polyline points="${coords.join(" ")}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function latencyBar(ms) {
+  if (ms == null) return "";
+  const pct = Math.max(8, Math.min(100, Math.round(ms / 12)));
+  return `<div class="latency-bar"><span style="width:${pct}%"></span></div>`;
+}
+
 function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
   const statusMap = new Map((statuses || []).map((item) => [item.id, item]));
   const grid = document.getElementById(targetId);
@@ -89,14 +120,21 @@ function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
     const status = statusMap.get(app.id) || app;
     const state = status.status || "unknown";
     const latency = status.latency_ms != null ? `${status.latency_ms} ms` : "Latency N/A";
+    const uptime = status.uptime_24h != null ? `${status.uptime_24h}% 24h` : "Uptime N/A";
+    const avg = status.avg_latency_ms != null ? `avg ${status.avg_latency_ms} ms` : "";
     return `
-      <article class="card">
+      <article class="card card-${state}">
         <div class="card-head">
           <div class="icon-wrap">${iconMarkup(app.icon)}</div>
           <div class="status"><span class="dot ${state}"></span>${state}</div>
         </div>
         <h2>${escapeHtml(app.name)}</h2>
         <p>${escapeHtml(app.description || "")}</p>
+        <div class="uptime-row">
+          ${sparklineSvg(status.sparkline)}
+          <div class="uptime-meta">${uptime}${avg ? `<br>${avg}` : ""}</div>
+        </div>
+        ${latencyBar(status.latency_ms)}
         <div class="card-foot">
           <div class="latency">${latency}<br>Checked ${formatTime(status.last_checked)}</div>
           <a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noopener noreferrer">${buttonLabel}</a>
@@ -132,6 +170,7 @@ async function loadDashboard(refresh = false) {
     if (!res.ok) throw new Error("offline");
     const data = await res.json();
     applyServerInfo(data.server);
+    applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
@@ -149,6 +188,25 @@ async function loadDashboard(refresh = false) {
 document.getElementById("refresh-btn").addEventListener("click", () => {
   loadDashboard(true);
 });
+
+let deferredPrompt = null;
+const installBtn = document.getElementById("install-btn");
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredPrompt = event;
+  installBtn.classList.remove("hidden");
+});
+installBtn.addEventListener("click", async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.classList.add("hidden");
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 
 renderClock();
 setInterval(renderClock, 1000);

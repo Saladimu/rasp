@@ -6,6 +6,9 @@ A lightweight, self-hosted control panel for a personal home server. It provides
 
 - Responsive dashboard for File Browser, FreeLLMAPI, Telegram Bot, personal websites, and extra apps you add
 - Backend health checks over HTTP, HTTPS, or TCP (avoids browser CORS limits)
+- 24h/7d uptime history, latency bars, and sparklines from stored probe results
+- Telegram or HTTPS webhook alerts after consecutive failures, with optional quiet hours
+- Installable PWA with cached CSS/JS for faster repeat visits
 - SQLite persistence for applications and the hashed admin account
 - Session cookies, CSRF protection, login rate limiting, and health-check host allowlisting
 - Docker Compose deployment with a persistent data volume
@@ -112,6 +115,7 @@ Private or loopback addresses are allowed only when the hostname or IP is presen
 
 Public:
 
+- `GET /api/dashboard`
 - `GET /api/apps`
 - `GET /api/status`
 - `GET /api/status?refresh=true`
@@ -136,6 +140,9 @@ Admin (session cookie required):
 - `PUT /api/admin/websites/{id}/visibility`
 - `DELETE /api/admin/websites/{id}`
 - `PUT /api/admin/reorder`
+- `GET /api/admin/alerts`
+- `PUT /api/admin/alerts`
+- `POST /api/admin/alerts/test`
 - `POST /api/admin/icons`
 
 Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_csrf` cookie.
@@ -143,6 +150,21 @@ Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_
 ## Server metrics
 
 CPU, RAM, disk, and uptime are read from the dashboard host with `psutil`. If a metric cannot be collected, the UI shows `Not Available`. Values are never invented.
+
+## Uptime history
+
+Each probe result is stored for 7 days. The dashboard shows a 24h sparkline, 24h uptime percent, and average latency when enough checks exist. History is not fabricated; new installs show `Uptime N/A` until checks accumulate.
+
+## Down alerts
+
+Configure alerts in Admin > Down Alerts, or with environment variables:
+
+- Telegram: create a bot with BotFather, start a chat, then set `ALERT_TELEGRAM_BOT_TOKEN` and `ALERT_TELEGRAM_CHAT_ID`
+- Webhook: HTTPS URL only, same public-host rules as website health checks
+- `ALERT_FAIL_THRESHOLD` consecutive offline checks before a down alert (default 2)
+- Quiet hours use `ALERT_QUIET_START` / `ALERT_QUIET_END` as `HH:MM` in `ALERT_TIMEZONE`
+
+A recovery message is sent when a previously down service comes back online. Use Send Test after saving.
 
 ## Backup and update
 
@@ -189,4 +211,12 @@ The `./data` directory is mounted as a volume, so applications and the admin acc
 | `PERSONAL_WEBSITE_URL` | Seed URL for the Personal Website section |
 | `HEALTH_INTERVAL_SECONDS` | Probe interval, clamped to 30-60 seconds |
 | `COOKIE_SECURE` | Set true when using HTTPS |
+| `ALERT_ENABLED` | Enable down alerts |
+| `ALERT_TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `ALERT_TELEGRAM_CHAT_ID` | Telegram chat ID |
+| `ALERT_WEBHOOK_URL` | HTTPS webhook for down/recovery events |
+| `ALERT_FAIL_THRESHOLD` | Consecutive failures before alerting |
+| `ALERT_QUIET_START` | Quiet-hours start, `HH:MM` |
+| `ALERT_QUIET_END` | Quiet-hours end, `HH:MM` |
+| `ALERT_TIMEZONE` | IANA timezone for quiet hours |
 | `DATA_DIR` | SQLite and icon storage directory |
