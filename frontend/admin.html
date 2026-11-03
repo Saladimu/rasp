@@ -55,54 +55,58 @@
 
   <div class="modal-backdrop hidden" id="modal">
     <div class="modal">
-      <h2 id="modal-title">Application</h2>
-      <div class="alert" id="form-error"></div>
-      <form class="form" id="app-form">
-        <input type="hidden" name="id">
-        <label>Name <input name="name" maxlength="80" required></label>
-        <label>Description <textarea name="description" rows="3" maxlength="240"></textarea></label>
-        <label>Application URL <input name="url" placeholder="http://127.0.0.1:8081" required></label>
-        <div class="row">
-          <label>Icon
-            <select name="icon">
-              <option value="folder">Folder</option>
-              <option value="brain">AI / Brain</option>
-              <option value="send">Telegram</option>
-              <option value="layout-grid">Grid</option>
-              <option value="server">Server</option>
-              <option value="globe">Globe</option>
-              <option value="database">Database</option>
-              <option value="cloud">Cloud</option>
-              <option value="shield">Shield</option>
-              <option value="terminal">Terminal</option>
-              <option value="camera">Camera</option>
-              <option value="music">Music</option>
-              <option value="video">Video</option>
-              <option value="mail">Mail</option>
-              <option value="home">Home</option>
-              <option value="box">Box</option>
-              <option value="cpu">CPU</option>
-              <option value="hard-drive">Disk</option>
-              <option value="wifi">Wi-Fi</option>
-              <option value="lock">Lock</option>
-            </select>
-          </label>
-          <label>Display order <input name="display_order" type="number" min="0" value="0"></label>
+      <div class="modal-header">
+        <h2 id="modal-title">Application</h2>
+      </div>
+      <form class="form modal-form" id="app-form">
+        <div class="modal-body">
+          <div class="alert" id="form-error"></div>
+          <input type="hidden" name="id">
+          <label>Name <input name="name" maxlength="80" required></label>
+          <label>Description <textarea name="description" rows="2" maxlength="240"></textarea></label>
+          <label>Application URL <input name="url" placeholder="http://127.0.0.1:8081" required></label>
+          <div class="row">
+            <label>Icon
+              <select name="icon">
+                <option value="folder">Folder</option>
+                <option value="brain">AI / Brain</option>
+                <option value="send">Telegram</option>
+                <option value="layout-grid">Grid</option>
+                <option value="server">Server</option>
+                <option value="globe">Globe</option>
+                <option value="database">Database</option>
+                <option value="cloud">Cloud</option>
+                <option value="shield">Shield</option>
+                <option value="terminal">Terminal</option>
+                <option value="camera">Camera</option>
+                <option value="music">Music</option>
+                <option value="video">Video</option>
+                <option value="mail">Mail</option>
+                <option value="home">Home</option>
+                <option value="box">Box</option>
+                <option value="cpu">CPU</option>
+                <option value="hard-drive">Disk</option>
+                <option value="wifi">Wi-Fi</option>
+                <option value="lock">Lock</option>
+              </select>
+            </label>
+            <label>Display order <input name="display_order" type="number" min="0" value="0"></label>
+          </div>
+          <div class="row">
+            <label>Health method
+              <select name="health_method">
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+                <option value="tcp">TCP</option>
+              </select>
+            </label>
+            <label>Health port <input name="health_port" type="number" min="1" max="65535" placeholder="Optional"></label>
+          </div>
+          <label>Health-check URL or host <input name="health_url" placeholder="http://127.0.0.1:8081/health"></label>
+          <label class="check"><input name="monitoring_enabled" type="checkbox" checked> Enable status monitoring</label>
+          <label>Upload custom icon <input id="icon-file" type="file" accept=".png,.svg,.webp,.jpg,.jpeg"></label>
         </div>
-        <div class="row">
-          <label>Health method
-            <select name="health_method">
-              <option value="http">HTTP</option>
-              <option value="https">HTTPS</option>
-              <option value="tcp">TCP</option>
-            </select>
-          </label>
-          <label>Health port <input name="health_port" type="number" min="1" max="65535" placeholder="Optional"></label>
-        </div>
-        <label>Health-check URL or host <input name="health_url" placeholder="http://127.0.0.1:8081/health"></label>
-        <label><input name="monitoring_enabled" type="checkbox" checked> Enable status monitoring</label>
-        <label>Upload custom icon <input id="icon-file" type="file" accept=".png,.svg,.webp,.jpg,.jpeg"></label>
-        <div class="actions">
+        <div class="modal-footer actions">
           <button class="btn" type="submit">Save</button>
           <button class="btn secondary" id="cancel-btn" type="button">Cancel</button>
         </div>
