@@ -169,6 +169,22 @@ button, input, textarea, select {
   margin: 8px 0 18px;
 }
 
+.toolbar.submenu {
+  margin-top: 36px;
+}
+
+.admin-section {
+  margin-top: 28px;
+}
+
+.admin-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -290,6 +306,22 @@ input, textarea, select {
   padding: 12px 8px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
+}
+
+.table tr.is-hidden td {
+  opacity: 0.55;
+}
+
+.visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.visibility-toggle input {
+  width: auto;
 }
 
 .admin-wrap {

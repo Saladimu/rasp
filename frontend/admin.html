@@ -25,30 +25,62 @@
     <div id="admin-panel" class="hidden">
       <header class="topbar">
         <div class="page-title">
-          <h1>Application Manager</h1>
-          <p>Add, edit, reorder, and monitor home-server apps.</p>
+          <h1>Service Manager</h1>
+          <p>Add, edit, and monitor applications and personal websites.</p>
         </div>
         <div class="meta">
           <div class="chip" id="admin-user"></div>
-          <button class="btn" id="add-btn" type="button">Add Application</button>
           <button class="btn secondary" id="logout-btn" type="button">Logout</button>
           <a class="btn secondary" href="/">Dashboard</a>
         </div>
       </header>
 
       <div class="admin-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>App</th>
-              <th>URL</th>
-              <th>Health</th>
-              <th>Order</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="app-table"></tbody>
-        </table>
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <div>
+              <h2 class="section-title">Applications</h2>
+              <p class="muted">Internal home-server services.</p>
+            </div>
+            <button class="btn" id="add-btn" type="button">Add Application</button>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>App</th>
+                <th>URL</th>
+                <th>Health</th>
+                <th>Visible</th>
+                <th>Order</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="app-table"></tbody>
+          </table>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <div>
+              <h2 class="section-title">Personal Website</h2>
+              <p class="muted">Public sites such as saladimu.my.id.</p>
+            </div>
+            <button class="btn" id="add-website-btn" type="button">Add Website</button>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Website</th>
+                <th>URL</th>
+                <th>Health</th>
+                <th>Visible</th>
+                <th>Order</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="website-table"></tbody>
+          </table>
+        </section>
       </div>
     </div>
   </div>
@@ -62,9 +94,10 @@
         <div class="modal-body">
           <div class="alert" id="form-error"></div>
           <input type="hidden" name="id">
+          <input type="hidden" name="kind" value="application">
           <label>Name <input name="name" maxlength="80" required></label>
           <label>Description <textarea name="description" rows="2" maxlength="240"></textarea></label>
-          <label>Application URL <input name="url" placeholder="http://127.0.0.1:8081" required></label>
+          <label id="url-label">Application URL <input name="url" placeholder="http://127.0.0.1:8081" required></label>
           <div class="row">
             <label>Icon
               <select name="icon">
@@ -104,6 +137,7 @@
           </div>
           <label>Health-check URL or host <input name="health_url" placeholder="http://127.0.0.1:8081/health"></label>
           <label class="check"><input name="monitoring_enabled" type="checkbox" checked> Enable status monitoring</label>
+          <label class="check"><input name="visible" type="checkbox" checked> Show on dashboard</label>
           <label>Upload custom icon <input id="icon-file" type="file" accept=".png,.svg,.webp,.jpg,.jpeg"></label>
         </div>
         <div class="modal-footer actions">

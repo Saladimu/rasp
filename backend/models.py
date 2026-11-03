@@ -40,9 +40,11 @@ class AppPayload(BaseModel):
     health_method: str = Field(default="http", max_length=10)
     health_port: Optional[int] = Field(default=None, ge=1, le=65535)
     monitoring_enabled: bool = True
+    visible: bool = True
     display_order: int = Field(default=0, ge=0, le=10000)
+    kind: str = Field(default="application", max_length=20)
 
-    @field_validator("name", "description", "url", "icon", "health_url", "health_method")
+    @field_validator("name", "description", "url", "icon", "health_url", "health_method", "kind")
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
@@ -68,6 +70,18 @@ class AppPayload(BaseModel):
             raise ValueError("Health-check method must be http, https, or tcp.")
         return method
 
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, value: str) -> str:
+        kind = value.lower()
+        if kind not in {"application", "website"}:
+            raise ValueError("Kind must be application or website.")
+        return kind
+
 
 class ReorderPayload(BaseModel):
     ids: list[int]
+
+
+class VisibilityPayload(BaseModel):
+    visible: bool

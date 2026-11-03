@@ -49,6 +49,8 @@ def init_db() -> None:
                 health_port INTEGER,
                 monitoring_enabled INTEGER NOT NULL DEFAULT 1,
                 display_order INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'application',
+                visible INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -68,6 +70,14 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time
                 ON login_attempts(ip, attempted_at);
             """
+        )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(apps)").fetchall()}
+        if "kind" not in columns:
+            conn.execute("ALTER TABLE apps ADD COLUMN kind TEXT NOT NULL DEFAULT 'application'")
+        if "visible" not in columns:
+            conn.execute("ALTER TABLE apps ADD COLUMN visible INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_apps_kind_order ON apps(kind, display_order, id)"
         )
 
 

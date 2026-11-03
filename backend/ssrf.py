@@ -60,6 +60,7 @@ def validate_health_target(
     method: str,
     port: int | None,
     allowed_hosts: set[str],
+    allow_public: bool = False,
 ) -> tuple[str, int]:
     method = (method or "http").strip().lower()
     if method not in {"http", "https", "tcp"}:
@@ -102,15 +103,17 @@ def validate_health_target(
 
     try:
         ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
         if _is_private_or_disallowed(ip) and hostname not in allowed_hosts:
             raise HealthCheckTargetError("Private or reserved IP addresses are not allowed.")
-        if hostname not in allowed_hosts:
+        if hostname not in allowed_hosts and not (allow_public and not _is_private_or_disallowed(ip)):
             raise HealthCheckTargetError("Health-check host is not in the allowlist.")
         return hostname, int(target_port)
-    except ValueError:
-        pass
 
-    if hostname not in allowed_hosts:
+    if hostname not in allowed_hosts and not allow_public:
         raise HealthCheckTargetError(
             "Health-check host is not in the allowlist. Add it to ALLOWED_HEALTHCHECK_HOSTS."
         )

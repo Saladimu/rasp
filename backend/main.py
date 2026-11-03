@@ -23,8 +23,8 @@ from .auth import (
 )
 from .config import DATA_DIR, settings
 from .database import db_session, init_db, row_to_dict
-from .health import STATUS_CACHE, check_app, check_apps
-from .models import AppPayload, LoginRequest, ReorderPayload
+from .health import cache_for, check_apps
+from .models import AppPayload, LoginRequest, ReorderPayload, VisibilityPayload
 from .seed import bootstrap
 from .serverinfo import collect_server_info
 from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_app_url, validate_health_target
@@ -35,14 +35,17 @@ SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
 
 def public_app(row: dict[str, Any]) -> dict[str, Any]:
-    status_info = STATUS_CACHE.get(row["id"], {})
+    kind = row.get("kind") or "application"
+    status_info = cache_for(kind).get(row["id"], {})
     return {
         "id": row["id"],
         "name": row["name"],
         "description": row["description"],
         "url": row["url"],
         "icon": row["icon"],
+        "kind": kind,
         "monitoring_enabled": bool(row["monitoring_enabled"]),
+        "visible": bool(row.get("visible", 1)),
         "display_order": row["display_order"],
         "status": status_info.get("status", "unknown"),
         "latency_ms": status_info.get("latency_ms"),
@@ -65,11 +68,20 @@ def admin_app(row: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def fetch_apps() -> list[dict[str, Any]]:
+def fetch_apps(kind: str | None = None, visible_only: bool = False) -> list[dict[str, Any]]:
+    query = "SELECT * FROM apps"
+    clauses = []
+    params: list[Any] = []
+    if kind:
+        clauses.append("kind = ?")
+        params.append(kind)
+    if visible_only:
+        clauses.append("visible = 1")
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY display_order ASC, id ASC"
     with db_session() as conn:
-        rows = conn.execute(
-            "SELECT * FROM apps ORDER BY display_order ASC, id ASC"
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -79,9 +91,86 @@ def validate_payload(payload: AppPayload) -> None:
         if payload.monitoring_enabled:
             target = payload.health_url or payload.url
             allowed = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
-            validate_health_target(target, payload.health_method, payload.health_port, allowed)
+            validate_health_target(
+                target,
+                payload.health_method,
+                payload.health_port,
+                allowed,
+                allow_public=(payload.kind == "website"),
+            )
     except HealthCheckTargetError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def insert_entry(payload: AppPayload) -> dict[str, Any]:
+    with db_session() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO apps (
+                name, description, url, icon, health_url, health_method,
+                health_port, monitoring_enabled, display_order, kind, visible
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.name,
+                payload.description,
+                payload.url,
+                payload.icon,
+                payload.health_url or payload.url,
+                payload.health_method,
+                payload.health_port,
+                1 if payload.monitoring_enabled else 0,
+                payload.display_order,
+                payload.kind,
+                1 if payload.visible else 0,
+            ),
+        )
+        app_id = cursor.lastrowid
+        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
+    return admin_app(row)
+
+
+def update_entry(app_id: int, payload: AppPayload) -> dict[str, Any]:
+    with db_session() as conn:
+        existing = conn.execute("SELECT id, kind FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Entry not found.")
+        if existing["kind"] != payload.kind:
+            raise HTTPException(status_code=400, detail="Cannot change entry type.")
+        conn.execute(
+            """
+            UPDATE apps SET
+                name = ?, description = ?, url = ?, icon = ?, health_url = ?,
+                health_method = ?, health_port = ?, monitoring_enabled = ?,
+                display_order = ?, visible = ?, updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                payload.name,
+                payload.description,
+                payload.url,
+                payload.icon,
+                payload.health_url or payload.url,
+                payload.health_method,
+                payload.health_port,
+                1 if payload.monitoring_enabled else 0,
+                payload.display_order,
+                1 if payload.visible else 0,
+                app_id,
+            ),
+        )
+        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
+    cache_for(payload.kind).pop(app_id, None)
+    return admin_app(row)
+
+
+def delete_entry(app_id: int, kind: str) -> None:
+    with db_session() as conn:
+        existing = conn.execute("SELECT id, kind FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if not existing or existing["kind"] != kind:
+            raise HTTPException(status_code=404, detail="Entry not found.")
+        conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
+    cache_for(kind).pop(app_id, None)
 
 
 @asynccontextmanager
@@ -137,26 +226,45 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+async def collect_status(kind: str | None = None, refresh: bool = False) -> list[dict[str, Any]]:
+    rows = fetch_apps(kind, visible_only=True)
+    results = []
+    pending = []
+    for row in rows:
+        cache = cache_for(row.get("kind") or "application")
+        cached = cache.get(row["id"])
+        if refresh or not cached:
+            pending.append(row)
+        else:
+            results.append(cached)
+    if pending:
+        probed = await check_apps(pending)
+        results.extend(probed)
+    order = {row["id"]: index for index, row in enumerate(rows)}
+    results.sort(key=lambda item: order.get(item["id"], 0))
+    return results
+
+
 @app.get("/api/apps")
 def list_apps() -> dict[str, Any]:
-    apps = [public_app(row) for row in fetch_apps()]
+    apps = [public_app(row) for row in fetch_apps("application", visible_only=True)]
     return {"apps": apps}
+
+
+@app.get("/api/websites")
+def list_websites() -> dict[str, Any]:
+    websites = [public_app(row) for row in fetch_apps("website", visible_only=True)]
+    return {"websites": websites}
 
 
 @app.get("/api/status")
 async def list_status(refresh: bool = False) -> dict[str, Any]:
-    apps = fetch_apps()
-    if refresh or not STATUS_CACHE:
-        results = await check_apps(apps)
-    else:
-        results = []
-        for row in apps:
-            cached = STATUS_CACHE.get(row["id"])
-            if cached:
-                results.append(cached)
-            else:
-                results.append(await check_app(row))
-    return {"statuses": results}
+    return {"statuses": await collect_status("application", refresh)}
+
+
+@app.get("/api/websites/status")
+async def list_website_status(refresh: bool = False) -> dict[str, Any]:
+    return {"statuses": await collect_status("website", refresh)}
 
 
 @app.get("/api/server-info")
@@ -206,7 +314,25 @@ def logout(response: Response) -> dict[str, Any]:
 
 @app.get("/api/admin/apps")
 def admin_list_apps(_: str = Depends(require_admin)) -> dict[str, Any]:
-    return {"apps": [admin_app(row) for row in fetch_apps()]}
+    return {"apps": [admin_app(row) for row in fetch_apps("application")]}
+
+
+@app.get("/api/admin/websites")
+def admin_list_websites(_: str = Depends(require_admin)) -> dict[str, Any]:
+    return {"websites": [admin_app(row) for row in fetch_apps("website")]}
+
+
+def set_visibility(app_id: int, kind: str, visible: bool) -> dict[str, Any]:
+    with db_session() as conn:
+        existing = conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if not existing or existing["kind"] != kind:
+            raise HTTPException(status_code=404, detail="Entry not found.")
+        conn.execute(
+            "UPDATE apps SET visible = ?, updated_at = datetime('now') WHERE id = ?",
+            (1 if visible else 0, app_id),
+        )
+        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
+    return admin_app(row)
 
 
 @app.put("/api/admin/reorder")
@@ -222,74 +348,62 @@ def reorder_apps(payload: ReorderPayload, _: str = Depends(require_admin)) -> di
 
 @app.post("/api/admin/apps")
 def create_app(payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    payload.kind = "application"
     validate_payload(payload)
-    with db_session() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO apps (
-                name, description, url, icon, health_url, health_method,
-                health_port, monitoring_enabled, display_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                payload.name,
-                payload.description,
-                payload.url,
-                payload.icon,
-                payload.health_url or payload.url,
-                payload.health_method,
-                payload.health_port,
-                1 if payload.monitoring_enabled else 0,
-                payload.display_order,
-            ),
-        )
-        app_id = cursor.lastrowid
-        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
-    return {"app": admin_app(row)}
+    return {"app": insert_entry(payload)}
 
 
 @app.put("/api/admin/apps/{app_id}")
 def update_app(app_id: int, payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    payload.kind = "application"
     validate_payload(payload)
-    with db_session() as conn:
-        existing = conn.execute("SELECT id FROM apps WHERE id = ?", (app_id,)).fetchone()
-        if not existing:
-            raise HTTPException(status_code=404, detail="Application not found.")
-        conn.execute(
-            """
-            UPDATE apps SET
-                name = ?, description = ?, url = ?, icon = ?, health_url = ?,
-                health_method = ?, health_port = ?, monitoring_enabled = ?,
-                display_order = ?, updated_at = datetime('now')
-            WHERE id = ?
-            """,
-            (
-                payload.name,
-                payload.description,
-                payload.url,
-                payload.icon,
-                payload.health_url or payload.url,
-                payload.health_method,
-                payload.health_port,
-                1 if payload.monitoring_enabled else 0,
-                payload.display_order,
-                app_id,
-            ),
-        )
-        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
-    STATUS_CACHE.pop(app_id, None)
-    return {"app": admin_app(row)}
+    return {"app": update_entry(app_id, payload)}
 
 
 @app.delete("/api/admin/apps/{app_id}")
 def delete_app(app_id: int, _: str = Depends(require_admin)) -> dict[str, Any]:
-    with db_session() as conn:
-        existing = conn.execute("SELECT id FROM apps WHERE id = ?", (app_id,)).fetchone()
-        if not existing:
-            raise HTTPException(status_code=404, detail="Application not found.")
-        conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
-    STATUS_CACHE.pop(app_id, None)
+    delete_entry(app_id, "application")
     return {"ok": True}
+
+
+@app.put("/api/admin/apps/{app_id}/visibility")
+def set_app_visibility(
+    app_id: int,
+    payload: VisibilityPayload,
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return {"app": set_visibility(app_id, "application", payload.visible)}
+
+
+@app.post("/api/admin/websites")
+def create_website(payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    payload.kind = "website"
+    if payload.icon == "layout-grid":
+        payload.icon = "globe"
+    validate_payload(payload)
+    return {"website": insert_entry(payload)}
+
+
+@app.put("/api/admin/websites/{app_id}")
+def update_website(app_id: int, payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    payload.kind = "website"
+    validate_payload(payload)
+    return {"website": update_entry(app_id, payload)}
+
+
+@app.delete("/api/admin/websites/{app_id}")
+def delete_website(app_id: int, _: str = Depends(require_admin)) -> dict[str, Any]:
+    delete_entry(app_id, "website")
+    return {"ok": True}
+
+
+@app.put("/api/admin/websites/{app_id}/visibility")
+def set_website_visibility(
+    app_id: int,
+    payload: VisibilityPayload,
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return {"website": set_visibility(app_id, "website", payload.visible)}
 
 
 @app.post("/api/admin/icons")

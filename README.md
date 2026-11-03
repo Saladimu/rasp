@@ -4,7 +4,7 @@ A lightweight, self-hosted control panel for a personal home server. It provides
 
 ## Features
 
-- Responsive dashboard for File Browser, FreeLLMAPI, Telegram Bot, and any extra apps you add
+- Responsive dashboard for File Browser, FreeLLMAPI, Telegram Bot, personal websites, and extra apps you add
 - Backend health checks over HTTP, HTTPS, or TCP (avoids browser CORS limits)
 - SQLite persistence for applications and the hashed admin account
 - Session cookies, CSRF protection, login rate limiting, and health-check host allowlisting
@@ -89,6 +89,7 @@ These defaults are seeded on first launch from `.env`:
 | File Browser | `http://127.0.0.1:8081` | HTTP GET on the same URL |
 | FreeLLMAPI | `http://127.0.0.1:8082` | HTTP GET on the same URL |
 | Telegram Bot | `http://127.0.0.1:8083` | HTTP GET on the same URL |
+| Personal Website | `https://saladimu.my.id` | HTTPS GET on the public site |
 
 If a service exposes `/health`, set that as the health-check URL in the admin panel. For apps without HTTP, use method `tcp` plus host and port.
 
@@ -114,6 +115,8 @@ Public:
 - `GET /api/apps`
 - `GET /api/status`
 - `GET /api/status?refresh=true`
+- `GET /api/websites`
+- `GET /api/websites/status`
 - `GET /api/server-info`
 - `GET /api/health`
 
@@ -125,7 +128,13 @@ Admin (session cookie required):
 - `GET /api/admin/apps`
 - `POST /api/admin/apps`
 - `PUT /api/admin/apps/{id}`
+- `PUT /api/admin/apps/{id}/visibility`
 - `DELETE /api/admin/apps/{id}`
+- `GET /api/admin/websites`
+- `POST /api/admin/websites`
+- `PUT /api/admin/websites/{id}`
+- `PUT /api/admin/websites/{id}/visibility`
+- `DELETE /api/admin/websites/{id}`
 - `PUT /api/admin/reorder`
 - `POST /api/admin/icons`
 
@@ -177,6 +186,7 @@ The `./data` directory is mounted as a volume, so applications and the admin acc
 | `FILEBROWSER_URL` | Seed URL for File Browser |
 | `FREELLMAPI_URL` | Seed URL for FreeLLMAPI |
 | `TELEGRAM_BOT_URL` | Seed URL for Telegram Bot |
+| `PERSONAL_WEBSITE_URL` | Seed URL for the Personal Website section |
 | `HEALTH_INTERVAL_SECONDS` | Probe interval, clamped to 30-60 seconds |
 | `COOKIE_SECURE` | Set true when using HTTPS |
 | `DATA_DIR` | SQLite and icon storage directory |

@@ -66,10 +66,10 @@ async function loadServerInfo() {
   }
 }
 
-function renderApps(apps, statuses) {
+function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
   const statusMap = new Map((statuses || []).map((item) => [item.id, item]));
-  const grid = document.getElementById("app-grid");
-  grid.innerHTML = apps.map((app) => {
+  const grid = document.getElementById(targetId);
+  grid.innerHTML = (items || []).map((app) => {
     const status = statusMap.get(app.id) || app;
     const state = status.status || "unknown";
     const latency = status.latency_ms != null ? `${status.latency_ms} ms` : "Latency N/A";
@@ -83,11 +83,11 @@ function renderApps(apps, statuses) {
         <p>${escapeHtml(app.description || "")}</p>
         <div class="card-foot">
           <div class="latency">${latency}<br>Checked ${formatTime(status.last_checked)}</div>
-          <a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noopener noreferrer">Open Application</a>
+          <a class="btn" href="${escapeAttr(app.url)}" target="_blank" rel="noopener noreferrer">${buttonLabel}</a>
         </div>
       </article>
     `;
-  }).join("") || "<p class='muted'>No applications registered yet.</p>";
+  }).join("") || `<p class='muted'>${emptyText}</p>`;
 }
 
 function escapeHtml(value) {
@@ -102,24 +102,30 @@ function escapeAttr(value) {
   return escapeHtml(value).replace(/'/g, "&#39;");
 }
 
-async function loadApps(refresh = false) {
-  const [appsRes, statusRes] = await Promise.all([
+async function loadDashboard(refresh = false) {
+  const query = refresh ? "?refresh=true" : "";
+  const [appsRes, appStatusRes, sitesRes, siteStatusRes] = await Promise.all([
     fetch("/api/apps", { cache: "no-store" }),
-    fetch(`/api/status${refresh ? "?refresh=true" : ""}`, { cache: "no-store" })
+    fetch(`/api/status${query}`, { cache: "no-store" }),
+    fetch("/api/websites", { cache: "no-store" }),
+    fetch(`/api/websites/status${query}`, { cache: "no-store" })
   ]);
   const appsData = await appsRes.json();
-  const statusData = await statusRes.json();
-  renderApps(appsData.apps || [], statusData.statuses || []);
+  const appStatusData = await appStatusRes.json();
+  const sitesData = await sitesRes.json();
+  const siteStatusData = await siteStatusRes.json();
+  renderCards("app-grid", appsData.apps || [], appStatusData.statuses || [], "No applications registered yet.", "Open Application");
+  renderCards("website-grid", sitesData.websites || [], siteStatusData.statuses || [], "No personal websites registered yet.", "Open Website");
 }
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
-  loadApps(true);
+  loadDashboard(true);
   loadServerInfo();
 });
 
 renderClock();
 setInterval(renderClock, 1000);
 loadServerInfo();
-loadApps();
-setInterval(() => loadApps(false), 45000);
+loadDashboard();
+setInterval(() => loadDashboard(false), 45000);
 setInterval(loadServerInfo, 30000);

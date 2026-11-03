@@ -80,8 +80,8 @@ def seed_default_apps() -> None:
                 """
                 INSERT INTO apps (
                     name, description, url, icon, health_url, health_method,
-                    health_port, monitoring_enabled, display_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    health_port, monitoring_enabled, display_order, kind
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'application')
                 """,
                 (
                     app["name"],
@@ -96,6 +96,36 @@ def seed_default_apps() -> None:
             )
 
 
+def seed_default_websites() -> None:
+    url = settings.personal_website_url.strip() or "https://saladimu.my.id"
+    with db_session() as conn:
+        existing = conn.execute(
+            "SELECT COUNT(*) AS total FROM apps WHERE kind = 'website'"
+        ).fetchone()["total"]
+        if existing:
+            return
+        parsed = urlparse(url)
+        health_method = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
+        conn.execute(
+            """
+            INSERT INTO apps (
+                name, description, url, icon, health_url, health_method,
+                health_port, monitoring_enabled, display_order, kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 'website')
+            """,
+            (
+                "Personal Website",
+                "Published personal site at saladimu.my.id.",
+                url,
+                "globe",
+                url,
+                health_method,
+                parsed.port,
+            ),
+        )
+
+
 def bootstrap() -> None:
     ensure_admin()
     seed_default_apps()
+    seed_default_websites()

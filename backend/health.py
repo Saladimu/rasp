@@ -9,24 +9,30 @@ from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_health_t
 from .config import settings
 
 STATUS_CACHE: dict[int, dict[str, Any]] = {}
+WEBSITE_STATUS_CACHE: dict[int, dict[str, Any]] = {}
 
 
-def empty_status(app_id: int, reason: str = "Unknown") -> dict[str, Any]:
+def cache_for(kind: str) -> dict[int, dict[str, Any]]:
+    return WEBSITE_STATUS_CACHE if kind == "website" else STATUS_CACHE
+
+
+def empty_status(app_id: int, reason: str = "Unknown", kind: str = "application") -> dict[str, Any]:
+    cache = cache_for(kind)
     return {
         "id": app_id,
         "status": "unknown",
         "latency_ms": None,
         "last_checked": None,
-        "last_success": STATUS_CACHE.get(app_id, {}).get("last_success"),
+        "last_success": cache.get(app_id, {}).get("last_success"),
         "message": reason,
     }
 
 
-async def check_http(url: str, timeout: float = 4.0) -> dict[str, Any]:
+async def check_http(url: str, timeout: float = 4.0, follow_redirects: bool = False) -> dict[str, Any]:
     started = time.perf_counter()
     async with httpx.AsyncClient(
         timeout=timeout,
-        follow_redirects=False,
+        follow_redirects=follow_redirects,
         trust_env=False,
         verify=True,
     ) as client:
@@ -58,9 +64,11 @@ async def check_tcp(host: str, port: int, timeout: float = 4.0) -> dict[str, Any
 
 async def check_app(app: dict[str, Any]) -> dict[str, Any]:
     app_id = int(app["id"])
+    kind = app.get("kind") or "application"
+    cache = cache_for(kind)
     if not app.get("monitoring_enabled"):
-        result = empty_status(app_id, "Monitoring disabled")
-        STATUS_CACHE[app_id] = result
+        result = empty_status(app_id, "Monitoring disabled", kind)
+        cache[app_id] = result
         return result
 
     allowed = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
@@ -73,6 +81,7 @@ async def check_app(app: dict[str, Any]) -> dict[str, Any]:
             method,
             app.get("health_port"),
             allowed,
+            allow_public=(kind == "website"),
         )
     except HealthCheckTargetError as exc:
         result = {
@@ -80,23 +89,26 @@ async def check_app(app: dict[str, Any]) -> dict[str, Any]:
             "status": "unknown",
             "latency_ms": None,
             "last_checked": now,
-            "last_success": STATUS_CACHE.get(app_id, {}).get("last_success"),
+            "last_success": cache.get(app_id, {}).get("last_success"),
             "message": str(exc),
         }
-        STATUS_CACHE[app_id] = result
+        cache[app_id] = result
         return result
 
     try:
         if method == "tcp":
             probe = await check_tcp(host, port)
         else:
-            probe = await check_http(target if "://" in target else f"{method}://{target}")
+            probe = await check_http(
+                target if "://" in target else f"{method}://{target}",
+                follow_redirects=(kind == "website"),
+            )
         result = {
             "id": app_id,
             "status": probe["status"],
             "latency_ms": probe["latency_ms"],
             "last_checked": now,
-            "last_success": now if probe["status"] == "online" else STATUS_CACHE.get(app_id, {}).get("last_success"),
+            "last_success": now if probe["status"] == "online" else cache.get(app_id, {}).get("last_success"),
             "message": probe["message"],
         }
     except Exception:
@@ -105,10 +117,10 @@ async def check_app(app: dict[str, Any]) -> dict[str, Any]:
             "status": "offline",
             "latency_ms": None,
             "last_checked": now,
-            "last_success": STATUS_CACHE.get(app_id, {}).get("last_success"),
+            "last_success": cache.get(app_id, {}).get("last_success"),
             "message": "Health check failed",
         }
-    STATUS_CACHE[app_id] = result
+    cache[app_id] = result
     return result
 
 

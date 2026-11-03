@@ -30,44 +30,64 @@ async function refreshSession() {
   return data;
 }
 
-function fillForm(app) {
+function fillForm(entry, kind) {
   const form = document.getElementById("app-form");
-  form.id.value = app?.id || "";
-  form.name.value = app?.name || "";
-  form.description.value = app?.description || "";
-  form.url.value = app?.url || "";
-  form.icon.value = app?.icon && !String(app.icon).startsWith("custom:") ? app.icon : "layout-grid";
-  if (app?.icon && String(app.icon).startsWith("custom:")) {
+  form.id.value = entry?.id || "";
+  form.kind.value = kind;
+  form.name.value = entry?.name || "";
+  form.description.value = entry?.description || "";
+  form.url.value = entry?.url || "";
+  const defaultIcon = kind === "website" ? "globe" : "layout-grid";
+  form.icon.value = entry?.icon && !String(entry.icon).startsWith("custom:") ? entry.icon : defaultIcon;
+  if (entry?.icon && String(entry.icon).startsWith("custom:")) {
     const option = document.createElement("option");
-    option.value = app.icon;
+    option.value = entry.icon;
     option.textContent = "Custom icon";
     option.selected = true;
     form.icon.appendChild(option);
   }
-  form.health_url.value = app?.health_url || "";
-  form.health_method.value = app?.health_method || "http";
-  form.health_port.value = app?.health_port || "";
-  form.display_order.value = app?.display_order || 0;
-  form.monitoring_enabled.checked = app?.monitoring_enabled !== false;
-  document.getElementById("modal-title").textContent = app?.id ? "Edit application" : "Add application";
+  form.health_url.value = entry?.health_url || "";
+  form.health_method.value = entry?.health_method || (kind === "website" ? "https" : "http");
+  form.health_port.value = entry?.health_port || "";
+  form.display_order.value = entry?.display_order || 0;
+  form.monitoring_enabled.checked = entry?.monitoring_enabled !== false;
+  form.visible.checked = entry?.visible !== false;
+  const noun = kind === "website" ? "website" : "application";
+  document.getElementById("modal-title").textContent = entry?.id ? `Edit ${noun}` : `Add ${noun}`;
+  document.getElementById("url-label").firstChild.textContent = kind === "website" ? "Website URL " : "Application URL ";
+  form.url.placeholder = kind === "website" ? "https://saladimu.my.id" : "http://127.0.0.1:8081";
   setAlert("form-error", "");
 }
 
-async function loadAdminApps() {
-  const data = await api("/api/admin/apps");
-  const body = document.getElementById("app-table");
-  body.innerHTML = data.apps.map((app) => `
-    <tr>
-      <td><strong>${escapeHtml(app.name)}</strong><br><span class="muted">${escapeHtml(app.description || "")}</span></td>
-      <td>${escapeHtml(app.url)}</td>
-      <td>${escapeHtml(app.health_method)} ${escapeHtml(app.health_url || "")}<br><span class="muted">${app.monitoring_enabled ? "Monitoring on" : "Monitoring off"}</span></td>
-      <td>${app.display_order}</td>
+function renderTable(targetId, items, kind) {
+  const body = document.getElementById(targetId);
+  body.innerHTML = (items || []).map((entry) => `
+    <tr class="${entry.visible ? "" : "is-hidden"}">
+      <td><strong>${escapeHtml(entry.name)}</strong><br><span class="muted">${escapeHtml(entry.description || "")}</span></td>
+      <td>${escapeHtml(entry.url)}</td>
+      <td>${escapeHtml(entry.health_method)} ${escapeHtml(entry.health_url || "")}<br><span class="muted">${entry.monitoring_enabled ? "Monitoring on" : "Monitoring off"}</span></td>
+      <td>
+        <label class="visibility-toggle">
+          <input type="checkbox" data-kind="${kind}" data-visible="${entry.id}" ${entry.visible ? "checked" : ""}>
+          ${entry.visible ? "Shown" : "Hidden"}
+        </label>
+      </td>
+      <td>${entry.display_order}</td>
       <td class="actions">
-        <button class="btn secondary" data-edit="${app.id}">Edit</button>
-        <button class="btn danger" data-delete="${app.id}">Delete</button>
+        <button class="btn secondary" data-kind="${kind}" data-edit="${entry.id}">Edit</button>
+        <button class="btn danger" data-kind="${kind}" data-delete="${entry.id}">Delete</button>
       </td>
     </tr>
-  `).join("");
+  `).join("") || `<tr><td colspan="6" class="muted">No ${kind === "website" ? "websites" : "applications"} yet.</td></tr>`;
+}
+
+async function loadAdminLists() {
+  const [appsData, sitesData] = await Promise.all([
+    api("/api/admin/apps"),
+    api("/api/admin/websites")
+  ]);
+  renderTable("app-table", appsData.apps, "application");
+  renderTable("website-table", sitesData.websites, "website");
 }
 
 function escapeHtml(value) {
@@ -78,8 +98,8 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function openModal(app) {
-  fillForm(app);
+function openModal(entry, kind) {
+  fillForm(entry, kind);
   show(document.getElementById("modal"), true);
 }
 
@@ -91,7 +111,7 @@ async function enterAdmin(username) {
   document.getElementById("admin-user").textContent = username;
   show(document.getElementById("login-panel"), false);
   show(document.getElementById("admin-panel"), true);
-  await loadAdminApps();
+  await loadAdminLists();
 }
 
 document.getElementById("login-form").addEventListener("submit", async (event) => {
@@ -116,23 +136,41 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
   window.location.reload();
 });
 
-document.getElementById("add-btn").addEventListener("click", () => openModal(null));
+document.getElementById("add-btn").addEventListener("click", () => openModal(null, "application"));
+document.getElementById("add-website-btn").addEventListener("click", () => openModal(null, "website"));
 document.getElementById("cancel-btn").addEventListener("click", closeModal);
 
-document.getElementById("app-table").addEventListener("click", async (event) => {
+async function handleTableClick(event) {
+  const kind = event.target.getAttribute("data-kind");
   const editId = event.target.getAttribute("data-edit");
   const deleteId = event.target.getAttribute("data-delete");
+  const visibleId = event.target.getAttribute("data-visible");
+  if (!kind) return;
+  const endpoint = kind === "website" ? "websites" : "apps";
+  if (visibleId) {
+    await api(`/api/admin/${endpoint}/${visibleId}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify({ visible: event.target.checked })
+    });
+    await loadAdminLists();
+    return;
+  }
   if (editId) {
-    const data = await api("/api/admin/apps");
-    const app = data.apps.find((item) => String(item.id) === editId);
-    openModal(app);
+    const data = await api(`/api/admin/${endpoint}`);
+    const items = data.apps || data.websites || [];
+    const entry = items.find((item) => String(item.id) === editId);
+    openModal(entry, kind);
   }
   if (deleteId) {
-    if (!window.confirm("Delete this application?")) return;
-    await api(`/api/admin/apps/${deleteId}`, { method: "DELETE" });
-    await loadAdminApps();
+    const noun = kind === "website" ? "website" : "application";
+    if (!window.confirm(`Delete this ${noun}?`)) return;
+    await api(`/api/admin/${endpoint}/${deleteId}`, { method: "DELETE" });
+    await loadAdminLists();
   }
-});
+}
+
+document.getElementById("app-table").addEventListener("click", handleTableClick);
+document.getElementById("website-table").addEventListener("click", handleTableClick);
 
 document.getElementById("icon-file").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -164,6 +202,8 @@ document.getElementById("icon-file").addEventListener("change", async (event) =>
 document.getElementById("app-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const kind = form.kind.value || "application";
+  const endpoint = kind === "website" ? "websites" : "apps";
   const payload = {
     name: form.name.value,
     description: form.description.value,
@@ -173,16 +213,18 @@ document.getElementById("app-form").addEventListener("submit", async (event) => 
     health_method: form.health_method.value,
     health_port: form.health_port.value ? Number(form.health_port.value) : null,
     monitoring_enabled: form.monitoring_enabled.checked,
-    display_order: Number(form.display_order.value || 0)
+    visible: form.visible.checked,
+    display_order: Number(form.display_order.value || 0),
+    kind
   };
   try {
     if (form.id.value) {
-      await api(`/api/admin/apps/${form.id.value}`, { method: "PUT", body: JSON.stringify(payload) });
+      await api(`/api/admin/${endpoint}/${form.id.value}`, { method: "PUT", body: JSON.stringify(payload) });
     } else {
-      await api("/api/admin/apps", { method: "POST", body: JSON.stringify(payload) });
+      await api(`/api/admin/${endpoint}`, { method: "POST", body: JSON.stringify(payload) });
     }
     closeModal();
-    await loadAdminApps();
+    await loadAdminLists();
   } catch (err) {
     setAlert("form-error", err.message);
   }

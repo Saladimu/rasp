@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     filebrowser_url: str = "http://127.0.0.1:8081"
     freellmapi_url: str = "http://127.0.0.1:8082"
     telegram_bot_url: str = "http://127.0.0.1:8083"
+    personal_website_url: str = "https://saladimu.my.id"
 
 
 settings = Settings()
