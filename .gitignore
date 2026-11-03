@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.py[cod]
+*.sqlite3
+data/dashboard.db
+data/dashboard.db-*
+data/.session_secret
+data/icons/*
+!data/icons/.gitkeep
+.venv/
+venv/
+*.log
+.DS_Store

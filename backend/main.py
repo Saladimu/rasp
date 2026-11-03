@@ -1,0 +1,355 @@
+import asyncio
+import re
+import secrets
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from .auth import (
+    CSRF_COOKIE_NAME,
+    clear_session_cookies,
+    client_ip,
+    current_user,
+    record_attempt,
+    require_admin,
+    set_session_cookies,
+    too_many_attempts,
+    verify_password,
+)
+from .config import DATA_DIR, settings
+from .database import db_session, init_db, row_to_dict
+from .health import STATUS_CACHE, check_app, check_apps
+from .models import AppPayload, LoginRequest, ReorderPayload
+from .seed import bootstrap
+from .serverinfo import collect_server_info
+from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_app_url, validate_health_target
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+ICON_DIR = DATA_DIR / "icons"
+SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+
+
+def public_app(row: dict[str, Any]) -> dict[str, Any]:
+    status_info = STATUS_CACHE.get(row["id"], {})
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "url": row["url"],
+        "icon": row["icon"],
+        "monitoring_enabled": bool(row["monitoring_enabled"]),
+        "display_order": row["display_order"],
+        "status": status_info.get("status", "unknown"),
+        "latency_ms": status_info.get("latency_ms"),
+        "last_checked": status_info.get("last_checked"),
+        "last_success": status_info.get("last_success"),
+    }
+
+
+def admin_app(row: dict[str, Any]) -> dict[str, Any]:
+    payload = public_app(row)
+    payload.update(
+        {
+            "health_url": row["health_url"],
+            "health_method": row["health_method"],
+            "health_port": row["health_port"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+    )
+    return payload
+
+
+def fetch_apps() -> list[dict[str, Any]]:
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT * FROM apps ORDER BY display_order ASC, id ASC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def validate_payload(payload: AppPayload) -> None:
+    try:
+        validate_app_url(payload.url)
+        if payload.monitoring_enabled:
+            target = payload.health_url or payload.url
+            allowed = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
+            validate_health_target(target, payload.health_method, payload.health_port, allowed)
+    except HealthCheckTargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    bootstrap()
+    stop_event = asyncio.Event()
+
+    async def monitor_loop() -> None:
+        interval = max(30, min(settings.health_interval_seconds, 60))
+        while not stop_event.is_set():
+            apps = fetch_apps()
+            await check_apps(apps)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                continue
+
+    task = asyncio.create_task(monitor_loop())
+    yield
+    stop_event.set()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Home Server Dashboard", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+    )
+    if not request.cookies.get(CSRF_COOKIE_NAME) and current_user(request):
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            secrets.token_urlsafe(32),
+            httponly=False,
+            samesite="lax",
+            secure=settings.cookie_secure,
+            path="/",
+        )
+    return response
+
+
+@app.get("/api/apps")
+def list_apps() -> dict[str, Any]:
+    apps = [public_app(row) for row in fetch_apps()]
+    return {"apps": apps}
+
+
+@app.get("/api/status")
+async def list_status(refresh: bool = False) -> dict[str, Any]:
+    apps = fetch_apps()
+    if refresh or not STATUS_CACHE:
+        results = await check_apps(apps)
+    else:
+        results = []
+        for row in apps:
+            cached = STATUS_CACHE.get(row["id"])
+            if cached:
+                results.append(cached)
+            else:
+                results.append(await check_app(row))
+    return {"statuses": results}
+
+
+@app.get("/api/server-info")
+def server_info() -> dict[str, Any]:
+    return collect_server_info()
+
+
+@app.get("/api/auth/session")
+def auth_session(request: Request) -> dict[str, Any]:
+    username = current_user(request)
+    return {
+        "authenticated": bool(username),
+        "username": username,
+        "csrf_token": request.cookies.get(CSRF_COOKIE_NAME),
+    }
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
+    ip = client_ip(request)
+    if too_many_attempts(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+        )
+    username = payload.username.strip()
+    with db_session() as conn:
+        user = row_to_dict(
+            conn.execute(
+                "SELECT username, password_hash FROM admin_users WHERE username = ?",
+                (username,),
+            ).fetchone()
+        )
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        record_attempt(ip, False)
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    record_attempt(ip, True)
+    csrf = set_session_cookies(response, user["username"])
+    return {"ok": True, "username": user["username"], "csrf_token": csrf}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response) -> dict[str, Any]:
+    clear_session_cookies(response)
+    return {"ok": True}
+
+
+@app.get("/api/admin/apps")
+def admin_list_apps(_: str = Depends(require_admin)) -> dict[str, Any]:
+    return {"apps": [admin_app(row) for row in fetch_apps()]}
+
+
+@app.put("/api/admin/reorder")
+def reorder_apps(payload: ReorderPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    with db_session() as conn:
+        for index, app_id in enumerate(payload.ids, start=1):
+            conn.execute(
+                "UPDATE apps SET display_order = ?, updated_at = datetime('now') WHERE id = ?",
+                (index, app_id),
+            )
+    return {"ok": True}
+
+
+@app.post("/api/admin/apps")
+def create_app(payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    validate_payload(payload)
+    with db_session() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO apps (
+                name, description, url, icon, health_url, health_method,
+                health_port, monitoring_enabled, display_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.name,
+                payload.description,
+                payload.url,
+                payload.icon,
+                payload.health_url or payload.url,
+                payload.health_method,
+                payload.health_port,
+                1 if payload.monitoring_enabled else 0,
+                payload.display_order,
+            ),
+        )
+        app_id = cursor.lastrowid
+        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
+    return {"app": admin_app(row)}
+
+
+@app.put("/api/admin/apps/{app_id}")
+def update_app(app_id: int, payload: AppPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    validate_payload(payload)
+    with db_session() as conn:
+        existing = conn.execute("SELECT id FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        conn.execute(
+            """
+            UPDATE apps SET
+                name = ?, description = ?, url = ?, icon = ?, health_url = ?,
+                health_method = ?, health_port = ?, monitoring_enabled = ?,
+                display_order = ?, updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                payload.name,
+                payload.description,
+                payload.url,
+                payload.icon,
+                payload.health_url or payload.url,
+                payload.health_method,
+                payload.health_port,
+                1 if payload.monitoring_enabled else 0,
+                payload.display_order,
+                app_id,
+            ),
+        )
+        row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
+    STATUS_CACHE.pop(app_id, None)
+    return {"app": admin_app(row)}
+
+
+@app.delete("/api/admin/apps/{app_id}")
+def delete_app(app_id: int, _: str = Depends(require_admin)) -> dict[str, Any]:
+    with db_session() as conn:
+        existing = conn.execute("SELECT id FROM apps WHERE id = ?", (app_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Application not found.")
+        conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
+    STATUS_CACHE.pop(app_id, None)
+    return {"ok": True}
+
+
+@app.post("/api/admin/icons")
+async def upload_icon(
+    file: UploadFile = File(...),
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    filename = Path(file.filename or "").name
+    if not SAFE_FILENAME.match(filename) or not filename.lower().endswith((".png", ".svg", ".webp", ".jpg", ".jpeg")):
+        raise HTTPException(status_code=400, detail="Icon must be a png, svg, webp, or jpg file.")
+    data = await file.read()
+    if len(data) > 256 * 1024:
+        raise HTTPException(status_code=400, detail="Icon must be 256 KB or smaller.")
+    destination = ICON_DIR / filename
+    destination.write_bytes(data)
+    return {"icon": f"custom:{filename}"}
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/icons/{filename}")
+def custom_icon(filename: str):
+    if not SAFE_FILENAME.match(filename):
+        raise HTTPException(status_code=404, detail="Icon not found.")
+    path = ICON_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Icon not found.")
+    return FileResponse(path)
+
+
+@app.get("/")
+def index_page():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/admin")
+def admin_page():
+    return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+@app.get("/admin.html")
+def admin_html():
+    return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(_: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_: Request, exc: RequestValidationError):
+    messages = []
+    for error in exc.errors():
+        loc = ".".join(str(part) for part in error.get("loc", []) if part != "body")
+        messages.append(f"{loc}: {error.get('msg', 'Invalid value')}" if loc else error.get("msg", "Invalid value"))
+    return JSONResponse(status_code=422, content={"detail": "; ".join(messages) or "Invalid request."})
