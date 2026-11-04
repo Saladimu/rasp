@@ -36,6 +36,7 @@ from .ssrf import (
     allowed_healthcheck_hosts,
     extra_hosts_payload,
     remove_extra_host,
+    rename_extra_host,
     validate_app_url,
     validate_health_target,
 )
@@ -113,18 +114,30 @@ def validate_payload(payload: AppPayload) -> None:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def next_display_order(kind: str) -> int:
-    with db_session() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(display_order), 0) AS max_order FROM apps WHERE kind = ?",
-            (kind,),
-        ).fetchone()
-    return int(row["max_order"] or 0) + 1
+def place_display_order(conn, kind: str, desired: int, exclude_id: int | None = None) -> tuple[int, bool]:
+    query = "SELECT id, display_order FROM apps WHERE kind = ?"
+    params: list[Any] = [kind]
+    if exclude_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_id)
+    rows = conn.execute(query, params).fetchall()
+    orders = [int(row["display_order"] or 0) for row in rows]
+    if desired <= 0:
+        return (max(orders) + 1 if orders else 1), False
+    if desired in orders:
+        shift_sql = "UPDATE apps SET display_order = display_order + 1, updated_at = datetime('now') WHERE kind = ? AND display_order >= ?"
+        shift_params: list[Any] = [kind, desired]
+        if exclude_id is not None:
+            shift_sql += " AND id != ?"
+            shift_params.append(exclude_id)
+        conn.execute(shift_sql, shift_params)
+        return desired, True
+    return desired, False
 
 
 def insert_entry(payload: AppPayload) -> dict[str, Any]:
-    display_order = payload.display_order if payload.display_order > 0 else next_display_order(payload.kind)
     with db_session() as conn:
+        display_order, shifted = place_display_order(conn, payload.kind, payload.display_order)
         cursor = conn.execute(
             """
             INSERT INTO apps (
@@ -148,16 +161,19 @@ def insert_entry(payload: AppPayload) -> dict[str, Any]:
         )
         app_id = cursor.lastrowid
         row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
-    return admin_app(row)
+    result = admin_app(row)
+    result["order_shifted"] = shifted
+    return result
 
 
 def update_entry(app_id: int, payload: AppPayload) -> dict[str, Any]:
     with db_session() as conn:
-        existing = conn.execute("SELECT id, kind FROM apps WHERE id = ?", (app_id,)).fetchone()
+        existing = conn.execute("SELECT id, kind, display_order FROM apps WHERE id = ?", (app_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Entry not found.")
         if existing["kind"] != payload.kind:
             raise HTTPException(status_code=400, detail="Cannot change entry type.")
+        display_order, shifted = place_display_order(conn, payload.kind, payload.display_order, app_id)
         conn.execute(
             """
             UPDATE apps SET
@@ -175,14 +191,16 @@ def update_entry(app_id: int, payload: AppPayload) -> dict[str, Any]:
                 payload.health_method,
                 payload.health_port,
                 1 if payload.monitoring_enabled else 0,
-                payload.display_order,
+                display_order,
                 1 if payload.visible else 0,
                 app_id,
             ),
         )
         row = dict(conn.execute("SELECT * FROM apps WHERE id = ?", (app_id,)).fetchone())
     cache_for(payload.kind).pop(app_id, None)
-    return admin_app(row)
+    result = admin_app(row)
+    result["order_shifted"] = shifted
+    return result
 
 
 def delete_entry(app_id: int, kind: str) -> None:
@@ -522,14 +540,29 @@ def list_healthcheck_hosts(_: str = Depends(require_admin)) -> dict[str, Any]:
 @app.post("/api/admin/healthcheck-hosts")
 def create_healthcheck_host(payload: HostPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
     try:
+        if payload.previous:
+            return rename_extra_host(payload.previous, payload.host)
         return add_extra_host(payload.host)
-    except HealthCheckTargetError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HealthCheckTargetError as extra_exc:
+        raise HTTPException(status_code=400, detail=str(extra_exc)) from extra_exc
 
 
-@app.delete("/api/admin/healthcheck-hosts/{host}")
+@app.put("/api/admin/healthcheck-hosts")
+def update_healthcheck_host(payload: HostPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    if not payload.previous:
+        raise HTTPException(status_code=400, detail="Previous host is required.")
+    try:
+        return rename_extra_host(payload.previous, payload.host)
+    except HealthCheckTargetError as extra_exc:
+        raise HTTPException(status_code=400, detail=str(extra_exc)) from extra_exc
+
+
+@app.delete("/api/admin/healthcheck-hosts")
 def delete_healthcheck_host(host: str, _: str = Depends(require_admin)) -> dict[str, Any]:
-    return remove_extra_host(host)
+    try:
+        return remove_extra_host(host)
+    except HealthCheckTargetError as extra_exc:
+        raise HTTPException(status_code=400, detail=str(extra_exc)) from extra_exc
 
 
 @app.post("/api/admin/icons")

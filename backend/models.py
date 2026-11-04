@@ -112,11 +112,20 @@ class VisibilityPayload(BaseModel):
 
 class HostPayload(BaseModel):
     host: str = Field(min_length=1, max_length=253)
+    previous: Optional[str] = Field(default=None, max_length=253)
 
     @field_validator("host")
     @classmethod
     def strip_host(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("previous")
+    @classmethod
+    def strip_previous(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class AlertSettingsPayload(BaseModel):

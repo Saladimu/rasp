@@ -5,6 +5,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV DATA_DIR=/app/data
+ENV DASHBOARD_NAME="Saladimu Server"
 
 COPY backend /app/backend
 COPY frontend /app/frontend

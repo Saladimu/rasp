@@ -38,6 +38,13 @@ def parse_allowed_hosts(raw: str) -> set[str]:
 
 def normalize_host(value: str) -> str:
     raw = (value or "").strip()
+    if raw.startswith("*."):
+        suffix = raw[2:].strip().lower().strip("[]")
+        if suffix.count(":") == 1 and not suffix.startswith(":"):
+            host_part, port_part = suffix.rsplit(":", 1)
+            if port_part.isdigit():
+                suffix = host_part
+        return f"*.{suffix}" if suffix else ""
     if "://" in raw:
         parsed = urlparse(raw)
         raw = parsed.hostname or ""
@@ -57,6 +64,15 @@ def validate_allowlist_host(value: str) -> str:
         raise HealthCheckTargetError("Health-check host is not allowed.")
     if len(hostname) > 253:
         raise HealthCheckTargetError("Host is too long.")
+    if hostname.startswith("*."):
+        suffix = hostname[2:]
+        if not HOST_NAME_RE.match(suffix):
+            raise HealthCheckTargetError("Wildcard must be a domain, for example *.saladimu.my.id")
+        if suffix.endswith(".local") or suffix.endswith(".internal"):
+            raise HealthCheckTargetError("Health-check host is not allowed.")
+        if suffix in ALWAYS_BLOCKED_HOSTS:
+            raise HealthCheckTargetError("Health-check host is not allowed.")
+        return hostname
     try:
         ipaddress.ip_address(hostname)
         return hostname
@@ -64,7 +80,24 @@ def validate_allowlist_host(value: str) -> str:
         pass
     if HOST_NAME_RE.match(hostname) or HOST_LABEL_RE.match(hostname):
         return hostname
-    raise HealthCheckTargetError("Enter a hostname or IP, for example llm.saladimu.my.id")
+    raise HealthCheckTargetError("Enter a hostname, wildcard, or IP, for example *.saladimu.my.id")
+
+
+def host_is_allowed(hostname: str, allowed_hosts: set[str]) -> bool:
+    host = (hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in allowed_hosts:
+        return True
+    for pattern in allowed_hosts:
+        if not pattern.startswith("*."):
+            continue
+        suffix = pattern[2:].strip()
+        if not suffix or not HOST_NAME_RE.match(suffix):
+            continue
+        if host.endswith("." + suffix) and host != suffix:
+            return True
+    return False
 
 
 def extra_allowed_hosts() -> set[str]:
@@ -105,14 +138,40 @@ def extra_hosts_payload() -> dict[str, list[str]]:
 def add_extra_host(value: str) -> dict[str, list[str]]:
     hostname = validate_allowlist_host(value)
     hosts = extra_allowed_hosts()
+    if hostname in hosts:
+        raise HealthCheckTargetError("That host is already in the allowlist.")
+    from .config import settings
+
+    if hostname in parse_allowed_hosts(settings.allowed_healthcheck_hosts):
+        raise HealthCheckTargetError("That host is already provided by .env.")
     hosts.add(hostname)
     _save_extra_hosts(hosts)
+    return extra_hosts_payload()
+
+
+def rename_extra_host(previous: str, value: str) -> dict[str, list[str]]:
+    old_host = normalize_host(previous)
+    new_host = validate_allowlist_host(value)
+    hosts = extra_allowed_hosts()
+    if old_host not in hosts:
+        raise HealthCheckTargetError("Host was not found.")
+    if new_host != old_host:
+        from .config import settings
+
+        env_hosts = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
+        if new_host in hosts or new_host in env_hosts:
+            raise HealthCheckTargetError("That host is already in the allowlist.")
+        hosts.discard(old_host)
+        hosts.add(new_host)
+        _save_extra_hosts(hosts)
     return extra_hosts_payload()
 
 
 def remove_extra_host(value: str) -> dict[str, list[str]]:
     hostname = normalize_host(value)
     hosts = extra_allowed_hosts()
+    if hostname not in hosts:
+        raise HealthCheckTargetError("Host was not found.")
     hosts.discard(hostname)
     _save_extra_hosts(hosts)
     return extra_hosts_payload()
@@ -193,9 +252,10 @@ def validate_health_target(
         raise HealthCheckTargetError("Health-check host is required.")
     if hostname in ALWAYS_BLOCKED_HOSTS:
         raise HealthCheckTargetError("Health-check host is not allowed.")
-    if hostname in DEFAULT_BLOCKED_HOSTS and hostname not in allowed_hosts:
+    allowed = host_is_allowed(hostname, allowed_hosts)
+    if hostname in DEFAULT_BLOCKED_HOSTS and not allowed:
         raise HealthCheckTargetError("Health-check host is not allowed.")
-    if (hostname.endswith(".local") or hostname.endswith(".internal")) and hostname not in allowed_hosts:
+    if (hostname.endswith(".local") or hostname.endswith(".internal")) and not allowed:
         raise HealthCheckTargetError("Health-check host is not allowed.")
     if not 1 <= int(target_port) <= 65535:
         raise HealthCheckTargetError("Health-check port is invalid.")
@@ -206,20 +266,20 @@ def validate_health_target(
         ip = None
 
     if ip is not None:
-        if _is_private_or_disallowed(ip) and hostname not in allowed_hosts:
+        if _is_private_or_disallowed(ip) and not allowed:
             raise HealthCheckTargetError("Private or reserved IP addresses are not allowed.")
-        if hostname not in allowed_hosts and not (allow_public and not _is_private_or_disallowed(ip)):
+        if not allowed and not (allow_public and not _is_private_or_disallowed(ip)):
             raise HealthCheckTargetError("Health-check host is not in the allowlist.")
         return hostname, int(target_port)
 
-    if hostname not in allowed_hosts and not allow_public:
+    if not allowed and not allow_public:
         raise HealthCheckTargetError(
             "Health-check host is not in the allowlist. Add it in Admin > Allowed Health-check Hosts."
         )
 
     for address in resolve_host(hostname):
         ip = ipaddress.ip_address(address)
-        if _is_private_or_disallowed(ip) and hostname not in allowed_hosts:
+        if _is_private_or_disallowed(ip) and not allowed:
             raise HealthCheckTargetError("Resolved address is not allowed for health checks.")
 
     return hostname, int(target_port)

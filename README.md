@@ -44,7 +44,7 @@ home-server-dashboard/
 cp .env.example .env
 ```
 
-2. Set a strong admin password and your service URLs in `.env`.
+2. Set a strong admin password and your service URLs in `.env`. Keep `DASHBOARD_NAME=Saladimu Server`.
 
 3. Start the stack:
 
@@ -105,7 +105,7 @@ The browser never probes application URLs directly. The backend checks them ever
 Health-check targets must:
 
 - Use `http`, `https`, or `tcp`
-- Belong to `ALLOWED_HEALTHCHECK_HOSTS`, or extra hosts added in Admin > Allowed Health-check Hosts
+- Belong to `ALLOWED_HEALTHCHECK_HOSTS`, extra hosts added in Admin > Allowed Health-check Hosts, or a matching wildcard such as `*.saladimu.my.id`
 - Avoid credentials in URLs
 - Avoid metadata hostnames
 
@@ -145,7 +145,8 @@ Admin (session cookie required):
 - `POST /api/admin/alerts/test`
 - `GET /api/admin/healthcheck-hosts`
 - `POST /api/admin/healthcheck-hosts`
-- `DELETE /api/admin/healthcheck-hosts`
+- `PUT /api/admin/healthcheck-hosts`
+- `DELETE /api/admin/healthcheck-hosts?host=`
 - `POST /api/admin/icons`
 
 Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_csrf` cookie.

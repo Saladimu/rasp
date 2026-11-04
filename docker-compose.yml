@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       DATA_DIR: /app/data
+      DASHBOARD_NAME: Saladimu Server
     volumes:
       - ./data:/app/data
     healthcheck:

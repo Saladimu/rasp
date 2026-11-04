@@ -61,10 +61,34 @@ function fillForm(entry, kind) {
   document.getElementById("url-label").firstChild.textContent = kind === "website" ? "Website URL " : "Application URL ";
   form.url.placeholder = kind === "website" ? "https://saladimu.my.id" : "http://127.0.0.1:8081";
   setAlert("form-error", "");
+  updateOrderNote();
+}
+
+function currentItems(kind) {
+  return kind === "website" ? lastWebsites : lastApps;
 }
 
 function nextDisplayOrder(items) {
   return (items || []).reduce((max, item) => Math.max(max, Number(item.display_order) || 0), 0) + 1;
+}
+
+function updateOrderNote() {
+  const form = document.getElementById("app-form");
+  const note = document.getElementById("order-note");
+  if (!form || !note) return;
+  const items = currentItems(form.kind.value || "application");
+  const currentId = form.id.value;
+  const desired = Number(form.display_order.value || 0);
+  const taken = (items || [])
+    .filter((item) => String(item.id) !== String(currentId))
+    .map((item) => Number(item.display_order) || 0);
+  if (desired > 0 && taken.includes(desired)) {
+    note.textContent = `Order ${desired} is already used. Saving will insert here and shift later items down.`;
+    note.classList.remove("hidden");
+    return;
+  }
+  note.textContent = "";
+  note.classList.add("hidden");
 }
 
 function renderTable(targetId, items, kind) {
@@ -194,6 +218,7 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
 document.getElementById("add-btn").addEventListener("click", () => openModal(null, "application"));
 document.getElementById("add-website-btn").addEventListener("click", () => openModal(null, "website"));
 document.getElementById("cancel-btn").addEventListener("click", closeModal);
+document.querySelector("input[name='display_order']").addEventListener("input", updateOrderNote);
 
 async function handleTableClick(event) {
   const kind = event.target.getAttribute("data-kind");
@@ -309,6 +334,25 @@ document.getElementById("alert-form").addEventListener("submit", async (event) =
   }
 });
 
+function resetHostForm() {
+  const form = document.getElementById("host-form");
+  form.host.value = "";
+  form.previous.value = "";
+  document.getElementById("host-submit").textContent = "Add Host";
+  document.getElementById("host-cancel").classList.add("hidden");
+}
+
+function editHost(host) {
+  const form = document.getElementById("host-form");
+  form.host.value = host;
+  form.previous.value = host;
+  document.getElementById("host-submit").textContent = "Save Host";
+  document.getElementById("host-cancel").classList.remove("hidden");
+  setAlert("host-error", "");
+  setAlert("host-ok", "");
+  form.host.focus();
+}
+
 async function loadHealthcheckHosts() {
   const data = await api("/api/admin/healthcheck-hosts");
   const extraHosts = data.extra_hosts || [];
@@ -323,7 +367,8 @@ async function loadHealthcheckHosts() {
         <td>${escapeHtml(host)}</td>
         <td>${extra ? "Admin" : ".env"}</td>
         <td class="actions">
-          ${extra ? `<button class="btn danger" data-remove-host="${escapeHtml(host)}" type="button">Remove</button>` : `<span class="muted">Locked</span>`}
+          ${extra ? `<button class="btn secondary" data-edit-host="${escapeHtml(host)}" type="button">Edit</button>
+          <button class="btn danger" data-remove-host="${escapeHtml(host)}" type="button">Delete</button>` : `<span class="muted">Locked</span>`}
         </td>
       </tr>
     `;
@@ -334,27 +379,41 @@ async function loadHealthcheckHosts() {
 document.getElementById("host-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const previous = form.previous.value;
   try {
     await api("/api/admin/healthcheck-hosts", {
-      method: "POST",
-      body: JSON.stringify({ host: form.host.value })
+      method: previous ? "PUT" : "POST",
+      body: JSON.stringify({ host: form.host.value, previous: previous || null })
     });
-    form.host.value = "";
+    resetHostForm();
     await loadHealthcheckHosts();
-    setAlert("host-ok", "Host added. You can save the application now.");
+    setAlert("host-ok", previous ? "Host updated." : "Host added. You can save the application now.");
   } catch (err) {
     setAlert("host-error", err.message);
     setAlert("host-ok", "");
   }
 });
 
+document.getElementById("host-cancel").addEventListener("click", () => {
+  resetHostForm();
+  setAlert("host-error", "");
+  setAlert("host-ok", "");
+});
+
 document.getElementById("host-table").addEventListener("click", async (event) => {
+  const editHostName = event.target.getAttribute("data-edit-host");
+  if (editHostName) {
+    editHost(editHostName);
+    return;
+  }
   const host = event.target.getAttribute("data-remove-host");
   if (!host) return;
+  if (!window.confirm(`Delete host ${host}?`)) return;
   try {
-    await api(`/api/admin/healthcheck-hosts/${encodeURIComponent(host)}`, { method: "DELETE" });
+    await api(`/api/admin/healthcheck-hosts?host=${encodeURIComponent(host)}`, { method: "DELETE" });
+    if (document.getElementById("host-form").previous.value === host) resetHostForm();
     await loadHealthcheckHosts();
-    setAlert("host-ok", "Host removed.");
+    setAlert("host-ok", "Host deleted.");
   } catch (err) {
     setAlert("host-error", err.message);
   }

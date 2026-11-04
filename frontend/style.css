@@ -205,6 +205,20 @@ button, input, textarea, select {
   color: #bbf7d0;
 }
 
+.order-note {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+  font-size: 0.82rem;
+}
+
+.order-note.hidden {
+  display: none;
+}
+
 .alert-form {
   padding: 18px;
   border: 1px solid var(--line);
