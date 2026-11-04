@@ -105,7 +105,7 @@ The browser never probes application URLs directly. The backend checks them ever
 Health-check targets must:
 
 - Use `http`, `https`, or `tcp`
-- Belong to `ALLOWED_HEALTHCHECK_HOSTS`
+- Belong to `ALLOWED_HEALTHCHECK_HOSTS`, or extra hosts added in Admin > Allowed Health-check Hosts
 - Avoid credentials in URLs
 - Avoid metadata hostnames
 
@@ -143,6 +143,9 @@ Admin (session cookie required):
 - `GET /api/admin/alerts`
 - `PUT /api/admin/alerts`
 - `POST /api/admin/alerts/test`
+- `GET /api/admin/healthcheck-hosts`
+- `POST /api/admin/healthcheck-hosts`
+- `DELETE /api/admin/healthcheck-hosts`
 - `POST /api/admin/icons`
 
 Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_csrf` cookie.

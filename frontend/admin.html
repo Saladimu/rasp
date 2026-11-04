@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin | My Home Server</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Admin | Saladimu Server</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <meta name="theme-color" content="#0b1220">
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=5">
+  <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
   <div class="shell">
@@ -132,6 +132,41 @@
           </form>
           </div>
         </section>
+
+        <section class="admin-section" data-section="hosts">
+          <div class="admin-section-head">
+            <button class="section-toggle" type="button" aria-expanded="true">
+              <span class="chevron" aria-hidden="true"></span>
+              <span>
+                <span class="section-title">Allowed Health-check Hosts</span>
+                <span class="muted">Add a host here when saving an application fails the allowlist check.</span>
+              </span>
+            </button>
+          </div>
+          <div class="admin-section-body">
+            <form class="form alert-form" id="host-form">
+              <div class="alert" id="host-error"></div>
+              <div class="alert success" id="host-ok"></div>
+              <div class="row">
+                <label>Host or URL <input name="host" placeholder="llm.saladimu.my.id" required></label>
+              </div>
+              <div class="actions">
+                <button class="btn" type="submit">Add Host</button>
+              </div>
+              <p class="muted" id="env-hosts"></p>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Host</th>
+                    <th>Source</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="host-table"></tbody>
+              </table>
+            </form>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -221,6 +256,6 @@
       </form>
     </div>
   </div>
-  <script src="/static/admin.js?v=4"></script>
+  <script src="/static/admin.js?v=7"></script>
 </body>
 </html>

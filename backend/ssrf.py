@@ -1,6 +1,10 @@
 import ipaddress
+import json
+import re
 import socket
 from urllib.parse import urlparse
+
+from .database import db_session
 
 ALWAYS_BLOCKED_HOSTS = {
     "metadata.google.internal",
@@ -14,6 +18,10 @@ DEFAULT_BLOCKED_HOSTS = {
     "localhost.localdomain",
 }
 
+EXTRA_HOSTS_KEY = "extra_healthcheck_hosts"
+HOST_NAME_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
 
 class HealthCheckTargetError(ValueError):
     pass
@@ -26,6 +34,97 @@ def parse_allowed_hosts(raw: str) -> set[str]:
         if value:
             hosts.add(value)
     return hosts
+
+
+def normalize_host(value: str) -> str:
+    raw = (value or "").strip()
+    if "://" in raw:
+        parsed = urlparse(raw)
+        raw = parsed.hostname or ""
+    raw = raw.strip().lower().strip("[]")
+    if raw.count(":") == 1 and not raw.startswith(":"):
+        host_part, port_part = raw.rsplit(":", 1)
+        if port_part.isdigit():
+            raw = host_part
+    return raw.strip()
+
+
+def validate_allowlist_host(value: str) -> str:
+    hostname = normalize_host(value)
+    if not hostname:
+        raise HealthCheckTargetError("Host is required.")
+    if hostname in ALWAYS_BLOCKED_HOSTS:
+        raise HealthCheckTargetError("Health-check host is not allowed.")
+    if len(hostname) > 253:
+        raise HealthCheckTargetError("Host is too long.")
+    try:
+        ipaddress.ip_address(hostname)
+        return hostname
+    except ValueError:
+        pass
+    if HOST_NAME_RE.match(hostname) or HOST_LABEL_RE.match(hostname):
+        return hostname
+    raise HealthCheckTargetError("Enter a hostname or IP, for example llm.saladimu.my.id")
+
+
+def extra_allowed_hosts() -> set[str]:
+    with db_session() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (EXTRA_HOSTS_KEY,)).fetchone()
+    if not row:
+        return set()
+    try:
+        values = json.loads(row["value"])
+    except (TypeError, json.JSONDecodeError):
+        values = []
+    hosts: set[str] = set()
+    if isinstance(values, list):
+        for item in values:
+            if isinstance(item, str) and item.strip():
+                hosts.add(item.strip().lower())
+    return hosts
+
+
+def allowed_healthcheck_hosts() -> set[str]:
+    from .config import settings
+
+    return parse_allowed_hosts(settings.allowed_healthcheck_hosts) | extra_allowed_hosts()
+
+
+def extra_hosts_payload() -> dict[str, list[str]]:
+    from .config import settings
+
+    env_hosts = sorted(parse_allowed_hosts(settings.allowed_healthcheck_hosts))
+    extra_hosts = sorted(extra_allowed_hosts())
+    return {
+        "env_hosts": env_hosts,
+        "extra_hosts": extra_hosts,
+        "hosts": sorted(set(env_hosts) | set(extra_hosts)),
+    }
+
+
+def add_extra_host(value: str) -> dict[str, list[str]]:
+    hostname = validate_allowlist_host(value)
+    hosts = extra_allowed_hosts()
+    hosts.add(hostname)
+    _save_extra_hosts(hosts)
+    return extra_hosts_payload()
+
+
+def remove_extra_host(value: str) -> dict[str, list[str]]:
+    hostname = normalize_host(value)
+    hosts = extra_allowed_hosts()
+    hosts.discard(hostname)
+    _save_extra_hosts(hosts)
+    return extra_hosts_payload()
+
+
+def _save_extra_hosts(hosts: set[str]) -> None:
+    payload = json.dumps(sorted(hosts))
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (EXTRA_HOSTS_KEY, payload),
+        )
 
 
 def _is_private_or_disallowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -115,7 +214,7 @@ def validate_health_target(
 
     if hostname not in allowed_hosts and not allow_public:
         raise HealthCheckTargetError(
-            "Health-check host is not in the allowlist. Add it to ALLOWED_HEALTHCHECK_HOSTS."
+            "Health-check host is not in the allowlist. Add it in Admin > Allowed Health-check Hosts."
         )
 
     for address in resolve_host(hostname):

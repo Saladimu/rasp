@@ -27,10 +27,18 @@ from .database import db_session, init_db, row_to_dict
 from .alerts import process_alerts, public_alert_settings, save_alert_settings, send_test_alert
 from .health import cache_for, check_apps, close_http_client, empty_status
 from .history import delete_history, overall_uptime, summaries_for
-from .models import AlertSettingsPayload, AppPayload, LoginRequest, ReorderPayload, VisibilityPayload
+from .models import AlertSettingsPayload, AppPayload, HostPayload, LoginRequest, ReorderPayload, VisibilityPayload
 from .seed import bootstrap
 from .serverinfo import collect_server_info
-from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_app_url, validate_health_target
+from .ssrf import (
+    HealthCheckTargetError,
+    add_extra_host,
+    allowed_healthcheck_hosts,
+    extra_hosts_payload,
+    remove_extra_host,
+    validate_app_url,
+    validate_health_target,
+)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 ICON_DIR = DATA_DIR / "icons"
@@ -93,7 +101,7 @@ def validate_payload(payload: AppPayload) -> None:
         validate_app_url(payload.url)
         if payload.monitoring_enabled:
             target = payload.health_url or payload.url
-            allowed = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
+            allowed = allowed_healthcheck_hosts()
             validate_health_target(
                 target,
                 payload.health_method,
@@ -504,6 +512,24 @@ async def test_alert_settings(_: str = Depends(require_admin)) -> dict[str, Any]
         return await send_test_alert()
     except HealthCheckTargetError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/healthcheck-hosts")
+def list_healthcheck_hosts(_: str = Depends(require_admin)) -> dict[str, Any]:
+    return extra_hosts_payload()
+
+
+@app.post("/api/admin/healthcheck-hosts")
+def create_healthcheck_host(payload: HostPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return add_extra_host(payload.host)
+    except HealthCheckTargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/admin/healthcheck-hosts/{host}")
+def delete_healthcheck_host(host: str, _: str = Depends(require_admin)) -> dict[str, Any]:
+    return remove_extra_host(host)
 
 
 @app.post("/api/admin/icons")

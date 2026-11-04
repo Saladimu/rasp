@@ -1,6 +1,6 @@
 {
-  "name": "My Home Server",
-  "short_name": "Home Server",
+  "name": "Saladimu Server",
+  "short_name": "Saladimu",
   "description": "Personal home-server dashboard with live health checks.",
   "start_url": "/",
   "scope": "/",

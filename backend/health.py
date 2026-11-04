@@ -5,8 +5,7 @@ from typing import Any
 
 import httpx
 
-from .ssrf import HealthCheckTargetError, parse_allowed_hosts, validate_health_target
-from .config import settings
+from .ssrf import HealthCheckTargetError, allowed_healthcheck_hosts, validate_health_target
 from .history import record_results
 
 STATUS_CACHE: dict[int, dict[str, Any]] = {}
@@ -107,7 +106,7 @@ async def check_app(app: dict[str, Any]) -> dict[str, Any]:
         cache[app_id] = result
         return result
 
-    allowed = parse_allowed_hosts(settings.allowed_healthcheck_hosts)
+    allowed = allowed_healthcheck_hosts()
     method = (app.get("health_method") or "http").lower()
     target = (app.get("health_url") or app.get("url") or "").strip()
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

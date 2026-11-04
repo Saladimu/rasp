@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     session_secret: str = ""
     session_days: int = 7
     allowed_healthcheck_hosts: str = "127.0.0.1,localhost"
-    dashboard_name: str = "My Home Server"
+    dashboard_name: str = "Saladimu Server"
     dashboard_subtitle: str = "Personal Infrastructure & Services"
     cookie_secure: bool = False
     trust_proxy: bool = False

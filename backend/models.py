@@ -110,6 +110,15 @@ class VisibilityPayload(BaseModel):
     visible: bool
 
 
+class HostPayload(BaseModel):
+    host: str = Field(min_length=1, max_length=253)
+
+    @field_validator("host")
+    @classmethod
+    def strip_host(cls, value: str) -> str:
+        return value.strip()
+
+
 class AlertSettingsPayload(BaseModel):
     alert_enabled: bool = False
     telegram_bot_token: Optional[str] = Field(default=None, max_length=200)

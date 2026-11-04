@@ -166,6 +166,7 @@ async function enterAdmin(username) {
   initCollapsibleSections();
   await loadAdminLists();
   await loadAlertSettings();
+  await loadHealthcheckHosts();
 }
 
 document.getElementById("login-form").addEventListener("submit", async (event) => {
@@ -305,6 +306,57 @@ document.getElementById("alert-form").addEventListener("submit", async (event) =
     setAlert("alert-ok", "Alert settings saved.");
   } catch (err) {
     setAlert("alert-error", err.message);
+  }
+});
+
+async function loadHealthcheckHosts() {
+  const data = await api("/api/admin/healthcheck-hosts");
+  const extraHosts = data.extra_hosts || [];
+  const hosts = data.hosts || [];
+  const envLabel = (data.env_hosts || []).join(", ") || "none";
+  document.getElementById("env-hosts").textContent = `From .env: ${envLabel}`;
+  const body = document.getElementById("host-table");
+  body.innerHTML = hosts.map((host) => {
+    const extra = extraHosts.includes(host);
+    return `
+      <tr>
+        <td>${escapeHtml(host)}</td>
+        <td>${extra ? "Admin" : ".env"}</td>
+        <td class="actions">
+          ${extra ? `<button class="btn danger" data-remove-host="${escapeHtml(host)}" type="button">Remove</button>` : `<span class="muted">Locked</span>`}
+        </td>
+      </tr>
+    `;
+  }).join("") || `<tr><td colspan="3" class="muted">No hosts yet.</td></tr>`;
+  setAlert("host-error", "");
+}
+
+document.getElementById("host-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api("/api/admin/healthcheck-hosts", {
+      method: "POST",
+      body: JSON.stringify({ host: form.host.value })
+    });
+    form.host.value = "";
+    await loadHealthcheckHosts();
+    setAlert("host-ok", "Host added. You can save the application now.");
+  } catch (err) {
+    setAlert("host-error", err.message);
+    setAlert("host-ok", "");
+  }
+});
+
+document.getElementById("host-table").addEventListener("click", async (event) => {
+  const host = event.target.getAttribute("data-remove-host");
+  if (!host) return;
+  try {
+    await api(`/api/admin/healthcheck-hosts/${encodeURIComponent(host)}`, { method: "DELETE" });
+    await loadHealthcheckHosts();
+    setAlert("host-ok", "Host removed.");
+  } catch (err) {
+    setAlert("host-error", err.message);
   }
 });
 
