@@ -257,6 +257,16 @@ button, input, textarea, select {
   font-size: 1.15rem;
 }
 
+.stat em {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .section-title {
   margin: 0;
 }
@@ -275,6 +285,10 @@ button, input, textarea, select {
 
 .admin-section {
   margin-top: 28px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(11, 18, 32, 0.45);
+  overflow: hidden;
 }
 
 .admin-section-head {
@@ -282,7 +296,56 @@ button, input, textarea, select {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  padding: 14px 16px;
+}
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-toggle .section-title,
+.section-toggle .muted {
+  display: block;
+}
+
+.section-toggle .muted {
+  margin-top: 4px;
+}
+
+.chevron {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+
+.admin-section.is-collapsed .chevron {
+  transform: rotate(-45deg);
+}
+
+.admin-section-body {
+  padding: 0 16px 16px;
+}
+
+.admin-section.is-collapsed .admin-section-body {
+  display: none;
+}
+
+.admin-section.is-collapsed .admin-section-head {
+  margin-bottom: 0;
 }
 
 .grid {

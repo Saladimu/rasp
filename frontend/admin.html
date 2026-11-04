@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <meta name="theme-color" content="#0b1220">
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <div class="shell">
@@ -41,59 +41,73 @@
       </header>
 
       <div class="admin-wrap">
-        <section class="admin-section">
+        <section class="admin-section" data-section="applications">
           <div class="admin-section-head">
-            <div>
-              <h2 class="section-title">Applications</h2>
-              <p class="muted">Internal home-server services.</p>
-            </div>
+            <button class="section-toggle" type="button" aria-expanded="true">
+              <span class="chevron" aria-hidden="true"></span>
+              <span>
+                <span class="section-title">Applications</span>
+                <span class="muted">Internal home-server services.</span>
+              </span>
+            </button>
             <button class="btn" id="add-btn" type="button">Add Application</button>
           </div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>App</th>
-                <th>URL</th>
-                <th>Health</th>
-                <th>Visible</th>
-                <th>Order</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="app-table"></tbody>
-          </table>
+          <div class="admin-section-body">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>App</th>
+                  <th>URL</th>
+                  <th>Health</th>
+                  <th>Visible</th>
+                  <th>Order</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="app-table"></tbody>
+            </table>
+          </div>
         </section>
 
-        <section class="admin-section">
+        <section class="admin-section" data-section="websites">
           <div class="admin-section-head">
-            <div>
-              <h2 class="section-title">Personal Website</h2>
-              <p class="muted">Public sites such as saladimu.my.id.</p>
-            </div>
+            <button class="section-toggle" type="button" aria-expanded="true">
+              <span class="chevron" aria-hidden="true"></span>
+              <span>
+                <span class="section-title">Personal Website</span>
+                <span class="muted">Public sites such as saladimu.my.id.</span>
+              </span>
+            </button>
             <button class="btn" id="add-website-btn" type="button">Add Website</button>
           </div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Website</th>
-                <th>URL</th>
-                <th>Health</th>
-                <th>Visible</th>
-                <th>Order</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="website-table"></tbody>
-          </table>
+          <div class="admin-section-body">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Website</th>
+                  <th>URL</th>
+                  <th>Health</th>
+                  <th>Visible</th>
+                  <th>Order</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="website-table"></tbody>
+            </table>
+          </div>
         </section>
 
-        <section class="admin-section">
+        <section class="admin-section" data-section="alerts">
           <div class="admin-section-head">
-            <div>
-              <h2 class="section-title">Down Alerts</h2>
-              <p class="muted">Telegram or webhook after consecutive failed checks. Quiet hours skip noise.</p>
-            </div>
+            <button class="section-toggle" type="button" aria-expanded="true">
+              <span class="chevron" aria-hidden="true"></span>
+              <span>
+                <span class="section-title">Down Alerts</span>
+                <span class="muted">Telegram or webhook after consecutive failed checks. Quiet hours skip noise.</span>
+              </span>
+            </button>
           </div>
+          <div class="admin-section-body">
           <form class="form alert-form" id="alert-form">
             <div class="alert" id="alert-error"></div>
             <div class="alert success" id="alert-ok"></div>
@@ -116,6 +130,7 @@
               <button class="btn secondary" id="alert-test-btn" type="button">Send Test</button>
             </div>
           </form>
+          </div>
         </section>
       </div>
     </div>
@@ -206,6 +221,6 @@
       </form>
     </div>
   </div>
-  <script src="/static/admin.js?v=3"></script>
+  <script src="/static/admin.js?v=4"></script>
 </body>
 </html>

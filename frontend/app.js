@@ -75,8 +75,11 @@ function applyServerInfo(info) {
   setText("dashboard-subtitle", info.dashboard_subtitle);
   setText("stat-hostname", info.hostname);
   setText("stat-cpu", info.cpu);
+  setText("stat-cpu-detail", info.cpu_detail);
   setText("stat-ram", info.ram);
+  setText("stat-ram-detail", info.ram_detail);
   setText("stat-disk", info.disk);
+  setText("stat-disk-detail", info.disk_detail);
   setText("stat-uptime", info.uptime);
   document.getElementById("server-status").textContent = "Online";
   document.getElementById("server-dot").className = "dot online";

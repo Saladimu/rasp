@@ -117,6 +117,32 @@ function closeModal() {
   show(document.getElementById("modal"), false);
 }
 
+function sectionStateKey(name) {
+  return `admin-section-${name}`;
+}
+
+function setSectionCollapsed(section, collapsed) {
+  section.classList.toggle("is-collapsed", collapsed);
+  const toggle = section.querySelector(".section-toggle");
+  if (toggle) toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  const name = section.getAttribute("data-section");
+  if (name) localStorage.setItem(sectionStateKey(name), collapsed ? "1" : "0");
+}
+
+function initCollapsibleSections() {
+  document.querySelectorAll(".admin-section[data-section]").forEach((section) => {
+    const name = section.getAttribute("data-section");
+    const stored = localStorage.getItem(sectionStateKey(name));
+    setSectionCollapsed(section, stored === "1");
+    const toggle = section.querySelector(".section-toggle");
+    if (!toggle || toggle.dataset.bound === "1") return;
+    toggle.dataset.bound = "1";
+    toggle.addEventListener("click", () => {
+      setSectionCollapsed(section, !section.classList.contains("is-collapsed"));
+    });
+  });
+}
+
 async function loadAlertSettings() {
   const data = await api("/api/admin/alerts");
   const form = document.getElementById("alert-form");
@@ -137,6 +163,7 @@ async function enterAdmin(username) {
   document.getElementById("admin-user").textContent = username;
   show(document.getElementById("login-panel"), false);
   show(document.getElementById("admin-panel"), true);
+  initCollapsibleSections();
   await loadAdminLists();
   await loadAlertSettings();
 }
