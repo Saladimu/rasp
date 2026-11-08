@@ -59,35 +59,127 @@ def cpu_model_name() -> str:
     return _cpu_model_cache
 
 
-def _vcgencmd_path() -> str | None:
-    found = shutil.which("vcgencmd")
-    if found:
-        return found
-    for candidate in ("/usr/bin/vcgencmd", "/opt/vc/bin/vcgencmd"):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+def _parse_vcgencmd_temp(output: str) -> str | None:
+    text = (output or "").strip()
+    if not text:
+        return None
+    match = re.search(r"temp\s*=\s*(-?\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    if not match:
+        match = re.search(r"(-?\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    try:
+        return f"{float(match.group(1)):.1f}°C"
+    except ValueError:
+        return None
+
+
+def _run_command(args: list[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_vcgencmd_temp(f"{completed.stdout or ''}\n{completed.stderr or ''}")
+
+
+def _vcgencmd_binaries() -> list[str]:
+    found: list[str] = []
+    env_path = os.environ.get("VCGENCMD_PATH", "").strip()
+    if env_path:
+        found.append(env_path)
+    which = shutil.which("vcgencmd")
+    if which:
+        found.append(which)
+    found.extend(
+        [
+            "/usr/bin/vcgencmd",
+            "/opt/vc/bin/vcgencmd",
+            "/usr/local/bin/vcgencmd",
+            "/proc/1/root/usr/bin/vcgencmd",
+            "/proc/1/root/opt/vc/bin/vcgencmd",
+        ]
+    )
+    binaries: list[str] = []
+    seen: set[str] = set()
+    for path in found:
+        if path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            binaries.append(path)
+    return binaries
+
+
+def _vcgencmd_temperature() -> tuple[str, str] | None:
+    probes = (
+        (["measure_temp", "pmic"], "PMIC"),
+        (["measure_temp"], "SoC"),
+    )
+    nsenter = shutil.which("nsenter")
+    for extra, label in probes:
+        for binary in _vcgencmd_binaries():
+            value = _run_command([binary, *extra])
+            if value:
+                return value, label
+        if nsenter and os.path.exists("/proc/1/ns/mnt"):
+            value = _run_command([nsenter, "-t", "1", "-m", "--", "vcgencmd", *extra])
+            if value:
+                return value, label
     return None
 
 
-def read_pmic_temperature() -> tuple[str, str]:
-    binary = _vcgencmd_path()
-    if not binary:
-        return "Not Available", "PMIC"
+def _sysfs_temperature() -> tuple[str, str] | None:
+    base = "/sys/class/thermal"
     try:
-        completed = subprocess.run(
-            [binary, "measure_temp", "pmic"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        output = (completed.stdout or completed.stderr or "").strip()
-        match = re.search(r"temp\s*=\s*(-?\d+(?:\.\d+)?)\s*'?C", output, re.IGNORECASE)
-        if completed.returncode != 0 or not match:
-            return "Not Available", "PMIC"
-        return f"{float(match.group(1)):.1f}°C", "PMIC"
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return "Not Available", "PMIC"
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    zones: list[tuple[float, str]] = []
+    for name in names:
+        if not name.startswith("thermal_zone"):
+            continue
+        zone = os.path.join(base, name)
+        try:
+            with open(os.path.join(zone, "temp"), encoding="utf-8") as handle:
+                celsius = int(handle.read().strip()) / 1000.0
+            kind = "SoC"
+            try:
+                with open(os.path.join(zone, "type"), encoding="utf-8") as handle:
+                    kind = handle.read().strip() or "SoC"
+            except OSError:
+                pass
+            zones.append((celsius, kind))
+        except (OSError, ValueError):
+            continue
+    if not zones:
+        return None
+    chosen = zones[0]
+    for celsius, kind in zones:
+        lowered = kind.lower()
+        if "pmic" in lowered:
+            chosen = (celsius, kind)
+            break
+        if "cpu" in lowered or "soc" in lowered:
+            chosen = (celsius, kind)
+    celsius, kind = chosen
+    label = "PMIC" if "pmic" in kind.lower() else "SoC"
+    return f"{celsius:.1f}°C", label
+
+
+def read_pmic_temperature() -> tuple[str, str]:
+    value = _vcgencmd_temperature()
+    if value:
+        return value
+    value = _sysfs_temperature()
+    if value:
+        return value
+    return "Not Available", ""
 
 
 def collect_server_info() -> dict[str, Any]:

@@ -81,7 +81,10 @@ function applyServerInfo(info) {
   setText("stat-disk", info.disk);
   setText("stat-disk-detail", info.disk_detail);
   setText("stat-temp", info.temp);
-  setText("stat-temp-detail", info.temp_detail);
+  const tempDetail = document.getElementById("stat-temp-detail");
+  if (tempDetail) {
+    tempDetail.textContent = info.temp && info.temp !== "Not Available" ? (info.temp_detail || "") : "";
+  }
   setText("stat-uptime", info.uptime);
   document.getElementById("server-status").textContent = "Online";
   document.getElementById("server-dot").className = "dot online";

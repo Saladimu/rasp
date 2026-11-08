@@ -3,6 +3,8 @@ services:
     build: .
     container_name: home-server-dashboard
     restart: unless-stopped
+    privileged: true
+    pid: host
     ports:
       - "8000:8000"
     env_file:

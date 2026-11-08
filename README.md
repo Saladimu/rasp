@@ -153,7 +153,9 @@ Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_
 
 ## Server metrics
 
-CPU, RAM, disk, and uptime are read from the dashboard host with `psutil`. Temperature is read from the Raspberry Pi PMIC with `vcgencmd measure_temp pmic` and shown in Celsius. If a metric cannot be collected, the UI shows `Not Available`. Values are never invented.
+CPU, RAM, disk, and uptime are read from the dashboard host with `psutil`. Temperature prefers `vcgencmd measure_temp pmic` (then `vcgencmd measure_temp`), and falls back to `/sys/class/thermal` so it still works inside Docker. If a metric cannot be collected, the UI shows `Not Available`. Values are never invented.
+
+Docker Compose runs the dashboard `privileged` with `pid: host` so `vcgencmd` can reach the Pi firmware. Rebuild after pulling: `docker compose up -d --build`.
 
 ## Uptime history
 

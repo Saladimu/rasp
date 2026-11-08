@@ -10,7 +10,10 @@ ENV DASHBOARD_NAME="Saladimu Server"
 COPY backend /app/backend
 COPY frontend /app/frontend
 
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends util-linux \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r /app/backend/requirements.txt \
     && mkdir -p /app/data/icons
 
 EXPOSE 8000
