@@ -59,8 +59,18 @@ def cpu_model_name() -> str:
     return _cpu_model_cache
 
 
+def _vcgencmd_path() -> str | None:
+    found = shutil.which("vcgencmd")
+    if found:
+        return found
+    for candidate in ("/usr/bin/vcgencmd", "/opt/vc/bin/vcgencmd"):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def read_pmic_temperature() -> tuple[str, str]:
-    binary = shutil.which("vcgencmd")
+    binary = _vcgencmd_path()
     if not binary:
         return "Not Available", "PMIC"
     try:
@@ -72,10 +82,10 @@ def read_pmic_temperature() -> tuple[str, str]:
             check=False,
         )
         output = (completed.stdout or completed.stderr or "").strip()
-        match = re.search(r"(-?\d+(?:\.\d+)?)", output)
+        match = re.search(r"temp\s*=\s*(-?\d+(?:\.\d+)?)\s*'?C", output, re.IGNORECASE)
         if completed.returncode != 0 or not match:
             return "Not Available", "PMIC"
-        return f"{float(match.group(1)):.1f} °C", "PMIC"
+        return f"{float(match.group(1)):.1f}°C", "PMIC"
     except (OSError, subprocess.SubprocessError, ValueError):
         return "Not Available", "PMIC"
 
