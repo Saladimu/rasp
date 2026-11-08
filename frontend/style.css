@@ -254,7 +254,7 @@ button, input, textarea, select {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 14px;
   margin: 22px 0;
 }
@@ -657,7 +657,6 @@ input, textarea, select {
   .stat span { font-size: 0.7rem; }
   .stat strong { font-size: 1rem; margin-top: 4px; }
   .stat em { font-size: 0.74rem; margin-top: 4px; }
-  .stats .stat:last-child { grid-column: 1 / -1; }
 
   .toolbar { margin: 6px 0 12px; }
   .toolbar .muted { display: none; }

@@ -1,5 +1,8 @@
 import os
+import re
+import shutil
 import socket
+import subprocess
 import time
 from typing import Any
 
@@ -56,6 +59,27 @@ def cpu_model_name() -> str:
     return _cpu_model_cache
 
 
+def read_pmic_temperature() -> tuple[str, str]:
+    binary = shutil.which("vcgencmd")
+    if not binary:
+        return "Not Available", "PMIC"
+    try:
+        completed = subprocess.run(
+            [binary, "measure_temp", "pmic"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        output = (completed.stdout or completed.stderr or "").strip()
+        match = re.search(r"(-?\d+(?:\.\d+)?)", output)
+        if completed.returncode != 0 or not match:
+            return "Not Available", "PMIC"
+        return f"{float(match.group(1)):.1f} °C", "PMIC"
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return "Not Available", "PMIC"
+
+
 def collect_server_info() -> dict[str, Any]:
     now = time.monotonic()
     cached = _CACHE["data"]
@@ -69,6 +93,7 @@ def collect_server_info() -> dict[str, Any]:
     ram_detail = "Not Available"
     disk = "Not Available"
     disk_detail = "Not Available"
+    temp, temp_detail = read_pmic_temperature()
     uptime = "Not Available"
 
     try:
@@ -109,6 +134,8 @@ def collect_server_info() -> dict[str, Any]:
         "ram_detail": ram_detail,
         "disk": disk,
         "disk_detail": disk_detail,
+        "temp": temp,
+        "temp_detail": temp_detail,
         "uptime": uptime,
         "pid": os.getpid(),
         "status": "online",

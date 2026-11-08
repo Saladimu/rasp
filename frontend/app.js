@@ -80,6 +80,8 @@ function applyServerInfo(info) {
   setText("stat-ram-detail", info.ram_detail);
   setText("stat-disk", info.disk);
   setText("stat-disk-detail", info.disk_detail);
+  setText("stat-temp", info.temp);
+  setText("stat-temp-detail", info.temp_detail);
   setText("stat-uptime", info.uptime);
   document.getElementById("server-status").textContent = "Online";
   document.getElementById("server-dot").className = "dot online";

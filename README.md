@@ -153,7 +153,7 @@ Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_
 
 ## Server metrics
 
-CPU, RAM, disk, and uptime are read from the dashboard host with `psutil`. If a metric cannot be collected, the UI shows `Not Available`. Values are never invented.
+CPU, RAM, disk, and uptime are read from the dashboard host with `psutil`. Temperature is read from the Raspberry Pi PMIC with `vcgencmd measure_temp pmic` and shown in Celsius. If a metric cannot be collected, the UI shows `Not Available`. Values are never invented.
 
 ## Uptime history
 
