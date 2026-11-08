@@ -78,6 +78,8 @@ function applyServerInfo(info) {
   setText("stat-cpu-detail", info.cpu_detail);
   setText("stat-ram", info.ram);
   setText("stat-ram-detail", info.ram_detail);
+  setText("stat-swap", info.swap);
+  setText("stat-swap-detail", info.swap_detail);
   setText("stat-disk", info.disk);
   setText("stat-disk-detail", info.disk_detail);
   setText("stat-temp", info.temp);

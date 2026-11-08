@@ -182,6 +182,23 @@ def read_pmic_temperature() -> tuple[str, str]:
     return "Not Available", ""
 
 
+def _read_meminfo_swap(path: str) -> tuple[int, int] | None:
+    try:
+        values: dict[str, int] = {}
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("SwapTotal:") or line.startswith("SwapFree:"):
+                    key, raw, *_rest = line.split()
+                    values[key.rstrip(":")] = int(raw) * 1024
+        total = values.get("SwapTotal")
+        free = values.get("SwapFree")
+        if total is None or free is None:
+            return None
+        return total, max(total - free, 0)
+    except (OSError, ValueError):
+        return None
+
+
 def collect_server_info() -> dict[str, Any]:
     now = time.monotonic()
     cached = _CACHE["data"]
@@ -193,6 +210,8 @@ def collect_server_info() -> dict[str, Any]:
     cpu_detail = "Not Available"
     ram = "Not Available"
     ram_detail = "Not Available"
+    swap = "Not Available"
+    swap_detail = "Not Available"
     disk = "Not Available"
     disk_detail = "Not Available"
     temp, temp_detail = read_pmic_temperature()
@@ -217,6 +236,21 @@ def collect_server_info() -> dict[str, Any]:
         memory = psutil.virtual_memory()
         ram = f"{memory.percent:.1f}%"
         ram_detail = f"{format_bytes(memory.used)} / {format_bytes(memory.total)}"
+        swap_stat = psutil.swap_memory()
+        swap_total = swap_stat.total
+        swap_used = swap_stat.used
+        if not swap_total:
+            for path in ("/proc/meminfo", "/proc/1/root/proc/meminfo"):
+                parsed = _read_meminfo_swap(path)
+                if parsed and parsed[0]:
+                    swap_total, swap_used = parsed
+                    break
+        if swap_total:
+            swap = f"{(swap_used / swap_total) * 100:.1f}%"
+            swap_detail = f"{format_bytes(swap_used)} / {format_bytes(swap_total)}"
+        else:
+            swap = "None"
+            swap_detail = "No swap configured"
         disk_stat = psutil.disk_usage("/")
         disk = f"{disk_stat.percent:.1f}%"
         disk_detail = f"{format_bytes(disk_stat.used)} / {format_bytes(disk_stat.total)}"
@@ -234,6 +268,8 @@ def collect_server_info() -> dict[str, Any]:
         "cpu_detail": cpu_detail,
         "ram": ram,
         "ram_detail": ram_detail,
+        "swap": swap,
+        "swap_detail": swap_detail,
         "disk": disk,
         "disk_detail": disk_detail,
         "temp": temp,
