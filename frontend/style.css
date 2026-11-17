@@ -300,6 +300,18 @@ button, input, textarea, select {
   border-color: rgba(250, 204, 21, 0.38);
 }
 
+.stat.temp-online {
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
+.stat.temp-warn {
+  border-color: rgba(250, 204, 21, 0.38);
+}
+
+.stat.temp-offline {
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
 .section-title {
   margin: 0;
 }

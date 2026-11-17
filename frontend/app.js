@@ -95,6 +95,28 @@ function applyPowerDelivery(info) {
   }
 }
 
+function tempTone(value) {
+  if (!value || value === "Not Available") return "unknown";
+  const celsius = parseFloat(String(value).replace("°C", ""));
+  if (Number.isNaN(celsius)) return "unknown";
+  if (celsius < 60) return "online";
+  if (celsius < 65) return "warn";
+  return "offline";
+}
+
+function applyTemperature(info) {
+  const value = info.temp || "Not Available";
+  const card = document.getElementById("stat-temp-card");
+  setText("stat-temp", value);
+  const detailEl = document.getElementById("stat-temp-detail");
+  if (detailEl) {
+    detailEl.textContent = value !== "Not Available" ? (info.temp_detail || "") : "";
+  }
+  if (card) {
+    card.className = `stat temp-${tempTone(value)}`;
+  }
+}
+
 function applyServerInfo(info) {
   if (!info) return;
   setText("dashboard-name", info.dashboard_name);
@@ -108,11 +130,7 @@ function applyServerInfo(info) {
   setText("stat-swap-detail", info.swap_detail);
   setText("stat-disk", info.disk);
   setText("stat-disk-detail", info.disk_detail);
-  setText("stat-temp", info.temp);
-  const tempDetail = document.getElementById("stat-temp-detail");
-  if (tempDetail) {
-    tempDetail.textContent = info.temp && info.temp !== "Not Available" ? (info.temp_detail || "") : "";
-  }
+  applyTemperature(info);
   applyPowerDelivery(info);
   setText("stat-uptime", info.uptime);
   document.getElementById("server-status").textContent = "Online";
