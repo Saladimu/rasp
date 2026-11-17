@@ -69,6 +69,32 @@ function renderClock() {
   setText("clock", now.toLocaleString());
 }
 
+function powerTone(status) {
+  if (status === "Clean Power Delivery") return "online";
+  if (status === "Power Issue") return "offline";
+  if (status === "Past Undervoltage" || status === "Past Throttle") return "warn";
+  return "unknown";
+}
+
+function applyPowerDelivery(info) {
+  const status = info.power || "Not Available";
+  const raw = info.power_raw || "";
+  const detail = info.power_detail || "";
+  const card = document.getElementById("stat-power-card");
+  const detailEl = document.getElementById("stat-power-detail");
+  setText("stat-power", status);
+  if (detailEl) {
+    if (status === "Not Available") {
+      detailEl.textContent = detail || "";
+    } else {
+      detailEl.textContent = [raw, detail].filter(Boolean).join(" · ");
+    }
+  }
+  if (card) {
+    card.className = `stat power-${powerTone(status)}`;
+  }
+}
+
 function applyServerInfo(info) {
   if (!info) return;
   setText("dashboard-name", info.dashboard_name);
@@ -87,6 +113,7 @@ function applyServerInfo(info) {
   if (tempDetail) {
     tempDetail.textContent = info.temp && info.temp !== "Not Available" ? (info.temp_detail || "") : "";
   }
+  applyPowerDelivery(info);
   setText("stat-uptime", info.uptime);
   document.getElementById("server-status").textContent = "Online";
   document.getElementById("server-dot").className = "dot online";

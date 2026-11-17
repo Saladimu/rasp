@@ -254,7 +254,7 @@ button, input, textarea, select {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   margin: 22px 0;
 }
@@ -286,6 +286,18 @@ button, input, textarea, select {
   font-size: 0.82rem;
   line-height: 1.35;
   word-break: break-word;
+}
+
+.stat.power-online {
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
+.stat.power-offline {
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
+.stat.power-warn {
+  border-color: rgba(250, 204, 21, 0.38);
 }
 
 .section-title {

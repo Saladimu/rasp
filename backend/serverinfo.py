@@ -59,6 +59,28 @@ def cpu_model_name() -> str:
     return _cpu_model_cache
 
 
+_THROTTLE_HISTORY: list[int] = []
+_THROTTLE_HISTORY_MAX = 8
+_ACTIVE_UNDERVOLTAGE = 1 << 0
+_ACTIVE_FREQ_CAP = 1 << 1
+_ACTIVE_THROTTLED = 1 << 2
+_ACTIVE_SOFT_TEMP = 1 << 3
+_ACTIVE_MASK = 0xF
+_HISTORICAL_UNDERVOLTAGE = 1 << 16
+_POWER_ADVICE = "Use a dedicated 5V/3A adapter and a short, thick USB cable"
+
+_THROTTLE_FLAGS = (
+    (_ACTIVE_UNDERVOLTAGE, "under-voltage"),
+    (_ACTIVE_FREQ_CAP, "freq capped"),
+    (_ACTIVE_THROTTLED, "throttled"),
+    (_ACTIVE_SOFT_TEMP, "soft temp limit"),
+    (_HISTORICAL_UNDERVOLTAGE, "under-voltage occurred"),
+    (1 << 17, "freq cap occurred"),
+    (1 << 18, "throttling occurred"),
+    (1 << 19, "soft temp limit occurred"),
+)
+
+
 def _parse_vcgencmd_temp(output: str) -> str | None:
     text = (output or "").strip()
     if not text:
@@ -74,7 +96,20 @@ def _parse_vcgencmd_temp(output: str) -> str | None:
         return None
 
 
-def _run_command(args: list[str]) -> str | None:
+def _parse_vcgencmd_throttled(output: str) -> int | None:
+    text = (output or "").strip()
+    if not text:
+        return None
+    match = re.search(r"throttled\s*=\s*(0x[0-9a-fA-F]+|\d+)", text, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1), 0)
+    except ValueError:
+        return None
+
+
+def _run_process(args: list[str]) -> str | None:
     try:
         completed = subprocess.run(
             args,
@@ -85,7 +120,8 @@ def _run_command(args: list[str]) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return _parse_vcgencmd_temp(f"{completed.stdout or ''}\n{completed.stderr or ''}")
+    text = f"{completed.stdout or ''}\n{completed.stderr or ''}".strip()
+    return text or None
 
 
 def _vcgencmd_binaries() -> list[str]:
@@ -116,21 +152,35 @@ def _vcgencmd_binaries() -> list[str]:
     return binaries
 
 
+def _vcgencmd_outputs(extra: list[str]):
+    nsenter = shutil.which("nsenter")
+    for binary in _vcgencmd_binaries():
+        text = _run_process([binary, *extra])
+        if text:
+            yield text
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        text = _run_process([nsenter, "-t", "1", "-m", "--", "vcgencmd", *extra])
+        if text:
+            yield text
+
+
+def _first_vcgencmd(extra: list[str], parser):
+    for text in _vcgencmd_outputs(extra):
+        value = parser(text)
+        if value is not None:
+            return value
+    return None
+
+
 def _vcgencmd_temperature() -> tuple[str, str] | None:
     probes = (
         (["measure_temp", "pmic"], "PMIC"),
         (["measure_temp"], "SoC"),
     )
-    nsenter = shutil.which("nsenter")
     for extra, label in probes:
-        for binary in _vcgencmd_binaries():
-            value = _run_command([binary, *extra])
-            if value:
-                return value, label
-        if nsenter and os.path.exists("/proc/1/ns/mnt"):
-            value = _run_command([nsenter, "-t", "1", "-m", "--", "vcgencmd", *extra])
-            if value:
-                return value, label
+        value = _first_vcgencmd(extra, _parse_vcgencmd_temp)
+        if value:
+            return value, label
     return None
 
 
@@ -182,6 +232,53 @@ def read_pmic_temperature() -> tuple[str, str]:
     return "Not Available", ""
 
 
+def _throttle_hex(value: int) -> str:
+    return f"0x{value:x}"
+
+
+def _flag_labels(value: int) -> list[str]:
+    return [label for bit, label in _THROTTLE_FLAGS if value & bit]
+
+
+def _record_throttle(value: int) -> list[int]:
+    _THROTTLE_HISTORY.append(value)
+    if len(_THROTTLE_HISTORY) > _THROTTLE_HISTORY_MAX:
+        del _THROTTLE_HISTORY[0 : len(_THROTTLE_HISTORY) - _THROTTLE_HISTORY_MAX]
+    return list(_THROTTLE_HISTORY)
+
+
+def _power_status(value: int, history: list[int]) -> tuple[str, str, str]:
+    raw = f"throttled={_throttle_hex(value)}"
+    if value == 0:
+        detail = "Active and historical throttle flags are cleared across consecutive checks"
+        if len(history) <= 1:
+            detail = "Active and historical throttle flags are clear"
+        return "Clean Power Delivery", raw, detail
+    if value & _ACTIVE_MASK:
+        labels = _flag_labels(value & _ACTIVE_MASK)
+        detail = ", ".join(labels) if labels else "Power bottleneck is active"
+        if value & (_ACTIVE_UNDERVOLTAGE | _ACTIVE_THROTTLED):
+            detail = f"{detail}. {_POWER_ADVICE}"
+        return "Power Issue", raw, detail
+    if value & _HISTORICAL_UNDERVOLTAGE:
+        return (
+            "Past Undervoltage",
+            raw,
+            f"Active flags cleared; historical under-voltage remains until reboot. {_POWER_ADVICE}",
+        )
+    labels = _flag_labels(value)
+    detail = ", ".join(labels) if labels else "Historical throttle flags remain until reboot"
+    return "Past Throttle", raw, detail
+
+
+def read_power_delivery() -> tuple[str, str, str]:
+    value = _first_vcgencmd(["get_throttled"], _parse_vcgencmd_throttled)
+    if value is None:
+        return "Not Available", "", "vcgencmd get_throttled is unavailable"
+    history = _record_throttle(value)
+    return _power_status(value, history)
+
+
 def _read_meminfo_swap(path: str) -> tuple[int, int] | None:
     try:
         values: dict[str, int] = {}
@@ -215,6 +312,7 @@ def collect_server_info() -> dict[str, Any]:
     disk = "Not Available"
     disk_detail = "Not Available"
     temp, temp_detail = read_pmic_temperature()
+    power, power_raw, power_detail = read_power_delivery()
     uptime = "Not Available"
 
     try:
@@ -274,6 +372,9 @@ def collect_server_info() -> dict[str, Any]:
         "disk_detail": disk_detail,
         "temp": temp,
         "temp_detail": temp_detail,
+        "power": power,
+        "power_raw": power_raw,
+        "power_detail": power_detail,
         "uptime": uptime,
         "pid": os.getpid(),
         "status": "online",
