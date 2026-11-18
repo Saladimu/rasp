@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=11">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
   <div class="shell">
@@ -28,7 +28,7 @@
         <div class="chip"><span class="dot unknown" id="server-dot"></span><span id="server-status">Unknown</span></div>
         <button class="btn secondary hidden" id="install-btn" type="button">Install App</button>
         <button class="btn secondary" id="refresh-btn" type="button">Refresh Status</button>
-        <button class="btn secondary" id="theme-toggle" type="button" title="Toggle theme">🌙</button>
+        <button class="btn secondary" id="theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
         <a class="btn" href="/admin">Admin Login</a>
       </div>
     </header>
@@ -71,6 +71,6 @@
     </div>
     <section class="grid" id="website-grid"></section>
   </div>
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

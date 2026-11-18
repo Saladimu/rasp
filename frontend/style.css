@@ -14,23 +14,33 @@
   --danger: #fb7185;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
   --radius: 22px;
+  --surface: rgba(11, 18, 32, 0.72);
+  --surface-strong: rgba(15, 23, 42, 0.8);
+  --input-bg: #0b1220;
+  --glow-1: rgba(94, 234, 212, 0.12);
+  --glow-2: rgba(96, 165, 250, 0.14);
 }
 
-[data-theme="dark"] {
-  --bg: #0a0e1a;
-  --bg-elevated: #0f1424;
-  --bg-card: rgba(20, 28, 48, 0.85);
-  --bg-soft: #1a2338;
-  --line: rgba(160, 174, 192, 0.18);
-  --text: #f1f5f9;
-  --muted: #a8b8d0;
-  --accent: #a78bfa;
-  --accent-2: #f472b6;
-  --online: #4ade80;
-  --offline: #f87171;
-  --unknown: #94a3b8;
-  --danger: #fb7185;
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+html[data-theme="light"] {
+  --bg: #eef3fb;
+  --bg-elevated: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.9);
+  --bg-soft: #e8eef8;
+  --line: rgba(15, 23, 42, 0.12);
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #0f766e;
+  --accent-2: #2563eb;
+  --online: #059669;
+  --offline: #dc2626;
+  --unknown: #64748b;
+  --danger: #e11d48;
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
+  --surface: rgba(255, 255, 255, 0.82);
+  --surface-strong: #ffffff;
+  --input-bg: #ffffff;
+  --glow-1: rgba(15, 118, 110, 0.12);
+  --glow-2: rgba(37, 99, 235, 0.12);
 }
 
 * {
@@ -41,72 +51,13 @@ html, body {
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(94, 234, 212, 0.12), transparent 50%),
-    radial-gradient(900px 420px at 100% 0%, rgba(96, 165, 250, 0.14), transparent 45%),
+    radial-gradient(1200px 500px at 10% -10%, var(--glow-1), transparent 50%),
+    radial-gradient(900px 420px at 100% 0%, var(--glow-2), transparent 45%),
     var(--bg);
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-text-size-adjust: 100%;
   transition: background 0.3s ease, color 0.3s ease;
-}
-
-[data-theme="dark"] html, [data-theme="dark"] body {
-  background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(167, 139, 250, 0.15), transparent 50%),
-    radial-gradient(900px 420px at 100% 0%, rgba(244, 114, 182, 0.14), transparent 45%),
-    var(--bg);
-}
-
-[data-theme="dark"] .ribbon-item {
-  background: rgba(11, 18, 32, 0.85);
-}
-
-[data-theme="dark"] .chip, [data-theme="dark"] .status {
-  background: rgba(15, 23, 42, 0.8);
-}
-
-[data-theme="dark"] .btn {
-  background: linear-gradient(180deg, rgba(167, 139, 250, 0.16), rgba(244, 114, 182, 0.08));
-}
-
-[data-theme="dark"] .btn.secondary {
-  background: rgba(15, 23, 42, 0.8);
-}
-
-[data-theme="dark"] .btn.danger {
-  background: rgba(251, 113, 133, 0.12);
-  border-color: rgba(251, 113, 133, 0.35);
-}
-
-[data-theme="dark"] .alert-form {
-  background: rgba(11, 18, 32, 0.7);
-}
-
-[data-theme="dark"] .admin-section {
-  background: rgba(11, 18, 32, 0.6);
-}
-
-[data-theme="dark"] .modal-footer {
-  background: rgba(11, 18, 32, 0.96);
-}
-
-[data-theme="dark"] input, [data-theme="dark"] textarea, [data-theme="dark"] select {
-  background: #0a0e1a;
-}
-
-[data-theme="dark"] .order-note {
-  background: rgba(250, 204, 21, 0.12);
-  color: #fde68a;
-}
-
-[data-theme="dark"] .alert.success {
-  background: rgba(52, 211, 153, 0.12);
-  color: #bbf7d0;
-}
-
-[data-theme="dark"] .alert {
-  background: rgba(248, 113, 113, 0.12);
-  color: #fecaca;
 }
 
 body {
@@ -185,7 +136,7 @@ button, input, textarea, select {
 
 .chip, .status {
   padding: 8px 12px;
-  background: rgba(15, 23, 42, 0.7);
+  background: var(--surface-strong);
   color: var(--text);
   font-size: 0.92rem;
 }
@@ -213,7 +164,7 @@ button, input, textarea, select {
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(11, 18, 32, 0.72);
+  background: var(--surface);
 }
 
 .ribbon-item span {
@@ -300,7 +251,7 @@ button, input, textarea, select {
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(11, 18, 32, 0.55);
+  background: var(--surface);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -321,7 +272,24 @@ button, input, textarea, select {
 }
 
 .btn.secondary {
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--surface-strong);
+}
+
+#theme-toggle {
+  min-width: 42px;
+  min-height: 42px;
+  padding: 8px;
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  pointer-events: none;
 }
 
 .btn.danger {
@@ -409,7 +377,7 @@ button, input, textarea, select {
   margin-top: 28px;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(11, 18, 32, 0.45);
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -561,7 +529,7 @@ input, textarea, select {
   padding: 11px 12px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: #0b1220;
+  background: var(--input-bg);
   color: var(--text);
 }
 
@@ -667,7 +635,7 @@ input, textarea, select {
 .modal-footer {
   padding: 12px 24px 18px;
   border-top: 1px solid var(--line);
-  background: rgba(11, 18, 32, 0.96);
+  background: var(--bg-elevated);
   flex: 0 0 auto;
 }
 
@@ -707,7 +675,7 @@ input, textarea, select {
     gap: 12px;
     padding: 14px;
     border-radius: 18px;
-    background: rgba(16, 24, 39, 0.94);
+    background: var(--bg-card);
   }
 
   .brand { gap: 10px; }
