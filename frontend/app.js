@@ -140,6 +140,29 @@ function applyServerInfo(info) {
   document.getElementById("server-dot").className = "dot online";
 }
 
+function initTheme() {
+  const toggle = document.getElementById("theme-toggle");
+  if (!toggle) return;
+  
+  const saved = localStorage.getItem("theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = saved || (prefersDark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+  updateThemeIcon(toggle, theme);
+  
+  toggle.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const next = current === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("theme", next);
+    updateThemeIcon(toggle, next);
+  });
+}
+
+function updateThemeIcon(toggle, theme) {
+  toggle.textContent = theme === "dark" ? "☀️" : "🌙";
+}
+
 function applySummary(summary) {
   const data = summary || {};
   setText("sum-online", String(data.online || 0));
@@ -268,5 +291,6 @@ if ("serviceWorker" in navigator) {
 
 renderClock();
 setInterval(renderClock, 1000);
+initTheme();
 loadDashboard();
 setInterval(() => loadDashboard(false), 30000);

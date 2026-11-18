@@ -442,3 +442,21 @@ document.getElementById("alert-test-btn").addEventListener("click", async () => 
 refreshSession().then((session) => {
   if (session.authenticated) enterAdmin(session.username);
 }).catch(() => {});
+
+// Theme toggle for admin page
+const adminThemeToggle = document.getElementById("theme-toggle");
+if (adminThemeToggle) {
+  const saved = localStorage.getItem("theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = saved || (prefersDark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+  adminThemeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+  
+  adminThemeToggle.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const next = current === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("theme", next);
+    adminThemeToggle.textContent = next === "dark" ? "☀️" : "🌙";
+  });
+}

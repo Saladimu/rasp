@@ -16,6 +16,23 @@
   --radius: 22px;
 }
 
+[data-theme="dark"] {
+  --bg: #0a0e1a;
+  --bg-elevated: #0f1424;
+  --bg-card: rgba(20, 28, 48, 0.85);
+  --bg-soft: #1a2338;
+  --line: rgba(160, 174, 192, 0.18);
+  --text: #f1f5f9;
+  --muted: #a8b8d0;
+  --accent: #a78bfa;
+  --accent-2: #f472b6;
+  --online: #4ade80;
+  --offline: #f87171;
+  --unknown: #94a3b8;
+  --danger: #fb7185;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -30,6 +47,66 @@ html, body {
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-text-size-adjust: 100%;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+[data-theme="dark"] html, [data-theme="dark"] body {
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(167, 139, 250, 0.15), transparent 50%),
+    radial-gradient(900px 420px at 100% 0%, rgba(244, 114, 182, 0.14), transparent 45%),
+    var(--bg);
+}
+
+[data-theme="dark"] .ribbon-item {
+  background: rgba(11, 18, 32, 0.85);
+}
+
+[data-theme="dark"] .chip, [data-theme="dark"] .status {
+  background: rgba(15, 23, 42, 0.8);
+}
+
+[data-theme="dark"] .btn {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.16), rgba(244, 114, 182, 0.08));
+}
+
+[data-theme="dark"] .btn.secondary {
+  background: rgba(15, 23, 42, 0.8);
+}
+
+[data-theme="dark"] .btn.danger {
+  background: rgba(251, 113, 133, 0.12);
+  border-color: rgba(251, 113, 133, 0.35);
+}
+
+[data-theme="dark"] .alert-form {
+  background: rgba(11, 18, 32, 0.7);
+}
+
+[data-theme="dark"] .admin-section {
+  background: rgba(11, 18, 32, 0.6);
+}
+
+[data-theme="dark"] .modal-footer {
+  background: rgba(11, 18, 32, 0.96);
+}
+
+[data-theme="dark"] input, [data-theme="dark"] textarea, [data-theme="dark"] select {
+  background: #0a0e1a;
+}
+
+[data-theme="dark"] .order-note {
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+}
+
+[data-theme="dark"] .alert.success {
+  background: rgba(52, 211, 153, 0.12);
+  color: #bbf7d0;
+}
+
+[data-theme="dark"] .alert {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
 }
 
 body {
