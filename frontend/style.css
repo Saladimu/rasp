@@ -357,6 +357,17 @@ button, input, textarea, select {
   border-color: rgba(248, 113, 113, 0.38);
 }
 
+html[data-theme="light"] .stat.power-online,
+html[data-theme="light"] .stat.power-offline,
+html[data-theme="light"] .stat.power-warn,
+html[data-theme="light"] .stat.temp-online,
+html[data-theme="light"] .stat.temp-warn,
+html[data-theme="light"] .stat.temp-offline,
+html[data-theme="light"] .stat.power-unknown,
+html[data-theme="light"] .stat.temp-unknown {
+  background: #ffffff;
+}
+
 .section-title {
   margin: 0;
 }
