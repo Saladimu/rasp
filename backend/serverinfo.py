@@ -124,35 +124,219 @@ def _run_process(args: list[str]) -> str | None:
     return text or None
 
 
-def _read_file_safe(path: str) -> str | None:
+def _decode_sys_text(raw: bytes | str, collapse: bool = True) -> str:
+    if isinstance(raw, bytes):
+        text = raw.split(b"\x00", 1)[0].decode("utf-8", "replace")
+    else:
+        text = str(raw).split("\x00", 1)[0]
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if collapse:
+        return " ".join(text.split()).strip()
+    return text.strip()
+
+
+def _read_file_safe(path: str, collapse: bool = True) -> str | None:
     try:
-        with open(path, encoding="utf-8") as handle:
-            return handle.read().strip()
-    except (OSError, ValueError):
+        with open(path, "rb") as handle:
+            text = _decode_sys_text(handle.read(), collapse=collapse)
+    except OSError:
         return None
+    return text or None
+
+
+def _host_file_candidates(path: str) -> list[str]:
+    host_path = f"/proc/1/root{path}"
+    candidates = [host_path, path]
+    seen: list[str] = []
+    for item in candidates:
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+def _read_host_file(path: str, collapse: bool = True) -> str | None:
+    for candidate in _host_file_candidates(path):
+        text = _read_file_safe(candidate, collapse=collapse)
+        if text:
+            return text
+    nsenter = shutil.which("nsenter")
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        try:
+            completed = subprocess.run(
+                [nsenter, "-t", "1", "-m", "--", "cat", path],
+                capture_output=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            completed = None
+        if completed is not None:
+            text = _decode_sys_text(completed.stdout or b"", collapse=collapse)
+            if text:
+                return text
+    return None
+
+
+def _cpuinfo_field(text: str, *names: str) -> str | None:
+    wanted = {name.lower() for name in names}
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip().lower() in wanted:
+            value = value.strip()
+            if value:
+                return value
+    return None
+
+
+def _cpuinfo_model() -> str | None:
+    text = _read_host_file("/proc/cpuinfo", collapse=False)
+    if not text:
+        return None
+    model = _cpuinfo_field(text, "Model")
+    if model and not model.isdigit() and len(model) > 3:
+        return model
+    hardware = _cpuinfo_field(text, "Hardware")
+    if hardware and not hardware.isdigit():
+        return hardware
+    model_name = _cpuinfo_field(text, "model name")
+    if model_name:
+        return model_name
+    return None
+
+
+def _usable_model(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {"none", "not available", "default string", "system product name", "to be filled by o.e.m."}:
+        return None
+    return text
+
+
+def _device_model_name() -> str:
+    for path in (
+        "/proc/device-tree/model",
+        "/sys/firmware/devicetree/base/model",
+        "/sys/devices/virtual/dmi/id/product_name",
+        "/sys/class/dmi/id/product_name",
+    ):
+        value = _usable_model(_read_host_file(path))
+        if value:
+            return value
+    value = _usable_model(_cpuinfo_model())
+    if value:
+        return value
+    compatible = _read_host_file("/proc/device-tree/compatible") or _read_host_file(
+        "/sys/firmware/devicetree/base/compatible"
+    )
+    if compatible:
+        first = compatible.split(",")[0].strip()
+        if _usable_model(first):
+            return first
+    try:
+        import platform
+
+        value = _usable_model(platform.machine())
+        if value:
+            return value
+    except Exception:
+        pass
+    return "Not Available"
+
+
+def _parse_os_release(text: str) -> str | None:
+    fields: dict[str, str] = {}
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw = stripped.split("=", 1)
+        fields[key] = raw.strip().strip('"').strip("'")
+    pretty = fields.get("PRETTY_NAME") or fields.get("NAME")
+    version = fields.get("VERSION_ID") or fields.get("VERSION")
+    if pretty:
+        return pretty
+    if fields.get("NAME") and version:
+        return f"{fields['NAME']} {version}"
+    return version or None
+
+
+def _os_pretty_name() -> str:
+    for path in ("/etc/os-release", "/usr/lib/os-release"):
+        value = _parse_os_release(_read_host_file(path, collapse=False) or "")
+        if value:
+            return value
+    try:
+        import platform
+
+        system = (platform.system() or "").strip()
+        release = (platform.release() or "").strip()
+        if system and release:
+            return f"{system} {release}"
+        if system:
+            return system
+    except Exception:
+        pass
+    return "Not Available"
+
+
+def _kernel_arch() -> str:
+    try:
+        info = os.uname()
+        release = (info.release or "").strip()
+        machine = (info.machine or "").strip()
+        if release and machine:
+            return f"{release} {machine}"
+        if release or machine:
+            return release or machine
+    except OSError:
+        pass
+    for args in (["uname", "-rm"], ["uname", "-r"]):
+        value = _decode_sys_text(_run_process(args) or "")
+        if value:
+            return value
+    nsenter = shutil.which("nsenter")
+    if nsenter and os.path.exists("/proc/1/ns/uts"):
+        value = _decode_sys_text(_run_process([nsenter, "-t", "1", "-u", "--", "uname", "-rm"]) or "")
+        if value:
+            return value
+    text = _read_host_file("/proc/version", collapse=False)
+    if text:
+        parts = text.split()
+        if len(parts) >= 3:
+            machine = ""
+            try:
+                machine = os.uname().machine
+            except OSError:
+                machine = ""
+            return f"{parts[2]} {machine}".strip()
+        return text.split("\n", 1)[0]
+    return "Not Available"
 
 
 def collect_system_info() -> dict[str, str]:
-    device_model = _read_file_safe("/proc/device-tree/model")
-    if not device_model:
-        device_model = "Not Available"
-    
+    device_model = "Not Available"
     os_pretty_name = "Not Available"
+    kernel_arch = "Not Available"
     try:
-        with open("/etc/os-release", encoding="utf-8") as handle:
-            for line in handle:
-                if line.startswith("PRETTY_NAME="):
-                    os_pretty_name = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-    except (OSError, ValueError):
+        device_model = _device_model_name()
+    except Exception:
         pass
-    
-    kernel_arch = _run_process(["uname", "-rm"]) or "Not Available"
-    
+    try:
+        os_pretty_name = _os_pretty_name()
+    except Exception:
+        pass
+    try:
+        kernel_arch = _kernel_arch()
+    except Exception:
+        pass
     return {
-        "device_model": device_model,
-        "os_pretty_name": os_pretty_name,
-        "kernel_arch": kernel_arch,
+        "device_model": device_model or "Not Available",
+        "os_pretty_name": os_pretty_name or "Not Available",
+        "kernel_arch": kernel_arch or "Not Available",
     }
 
 
