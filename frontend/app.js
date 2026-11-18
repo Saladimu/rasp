@@ -122,6 +122,9 @@ function applyServerInfo(info) {
   setText("dashboard-name", info.dashboard_name);
   setText("dashboard-subtitle", info.dashboard_subtitle);
   setText("stat-hostname", info.hostname);
+  setText("stat-device-model", info.device_model);
+  setText("stat-os-release", info.os_pretty_name);
+  setText("stat-kernel", info.kernel_arch);
   setText("stat-cpu", info.cpu);
   setText("stat-cpu-detail", info.cpu_detail);
   setText("stat-ram", info.ram);

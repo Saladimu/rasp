@@ -187,6 +187,15 @@ async function enterAdmin(username) {
   document.getElementById("admin-user").textContent = username;
   show(document.getElementById("login-panel"), false);
   show(document.getElementById("admin-panel"), true);
+  // Clear all section states to start with all sections collapsed
+  document.querySelectorAll(".admin-section[data-section]").forEach((section) => {
+    const name = section.getAttribute("data-section");
+    if (name) {
+      localStorage.removeItem(sectionStateKey(name));
+      setSectionCollapsed(section, true);
+    }
+  });
+  // Now initialize with the cleared state
   initCollapsibleSections();
   await loadAdminLists();
   await loadAlertSettings();

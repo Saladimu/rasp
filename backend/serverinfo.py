@@ -124,6 +124,38 @@ def _run_process(args: list[str]) -> str | None:
     return text or None
 
 
+def _read_file_safe(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except (OSError, ValueError):
+        return None
+
+
+def collect_system_info() -> dict[str, str]:
+    device_model = _read_file_safe("/proc/device-tree/model")
+    if not device_model:
+        device_model = "Not Available"
+    
+    os_pretty_name = "Not Available"
+    try:
+        with open("/etc/os-release", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("PRETTY_NAME="):
+                    os_pretty_name = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    except (OSError, ValueError):
+        pass
+    
+    kernel_arch = _run_process(["uname", "-rm"]) or "Not Available"
+    
+    return {
+        "device_model": device_model,
+        "os_pretty_name": os_pretty_name,
+        "kernel_arch": kernel_arch,
+    }
+
+
 def _vcgencmd_binaries() -> list[str]:
     found: list[str] = []
     env_path = os.environ.get("VCGENCMD_PATH", "").strip()
@@ -314,6 +346,7 @@ def collect_server_info() -> dict[str, Any]:
     temp, temp_detail = read_pmic_temperature()
     power, power_raw, power_detail = read_power_delivery()
     uptime = "Not Available"
+    system_info = collect_system_info()
 
     try:
         import psutil
@@ -376,6 +409,9 @@ def collect_server_info() -> dict[str, Any]:
         "power_raw": power_raw,
         "power_detail": power_detail,
         "uptime": uptime,
+        "device_model": system_info["device_model"],
+        "os_pretty_name": system_info["os_pretty_name"],
+        "kernel_arch": system_info["kernel_arch"],
         "pid": os.getpid(),
         "status": "online",
         "dashboard_name": settings.dashboard_name,
