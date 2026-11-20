@@ -484,6 +484,53 @@ def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dic
         raise HTTPException(status_code=500, detail=f"Unmount failed: {exc}")
 
 
+USB_MOUNTPOINT = "/mnt/usb"
+
+
+def _host_output(result) -> str:
+    if not result:
+        return ""
+    return f"{result.stdout or ''}\n{result.stderr or ''}"
+
+
+def _mountpoint_busy(mountpoint: str) -> bool:
+    result = _host_run(["findmnt", "-n", "-o", "TARGET", "--target", mountpoint], timeout=5)
+    return bool(result and result.returncode == 0 and mountpoint in (result.stdout or ""))
+
+
+@app.post("/api/usb/mount")
+def mount_usb(_: str = Depends(require_admin)) -> dict[str, Any]:
+    import subprocess
+
+    mountpoint = USB_MOUNTPOINT
+    try:
+        from .serverinfo import unhide_usb_mount
+
+        if _mountpoint_busy(mountpoint):
+            unhide_usb_mount(mountpoint)
+            _clear_server_cache()
+            return {"ok": True, "message": f"Already mounted at {mountpoint}"}
+        prepared = _host_run(["mkdir", "-p", mountpoint], timeout=5)
+        if prepared is None or prepared.returncode != 0:
+            detail = (_host_output(prepared) or "Could not create mountpoint").strip()
+            raise HTTPException(status_code=500, detail=detail)
+        result = _host_run(["mount", mountpoint], timeout=15)
+        if result is None or result.returncode != 0:
+            detail = (_host_output(result) or "Mount failed").strip()
+            raise HTTPException(status_code=500, detail=detail)
+        if not _mountpoint_busy(mountpoint):
+            raise HTTPException(status_code=500, detail="Mount did not attach a filesystem")
+        unhide_usb_mount(mountpoint)
+        _clear_server_cache()
+        return {"ok": True, "message": f"Successfully mounted {mountpoint}"}
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Mount operation timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Mount failed: {exc}")
+
+
 @app.get("/api/admin/apps")
 def admin_list_apps(_: str = Depends(require_admin)) -> dict[str, Any]:
     return {"apps": [admin_app(row) for row in fetch_apps("application")]}

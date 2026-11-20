@@ -266,7 +266,8 @@ function emptyUsbCard() {
         <span>Use%: —</span>
       </div>
       <div class="card-foot">
-        <div class="latency">Waiting for a USB drive</div>
+        <div class="latency">/mnt/usb</div>
+        <button class="btn usb-mount" type="button" id="usb-mount-btn">Mount</button>
       </div>
     </article>
   `;
@@ -316,8 +317,8 @@ async function csrfHeader() {
   }
 }
 
-function errorDetail(value) {
-  if (!value) return "Unmount failed";
+function errorDetail(value, fallback = "USB operation failed") {
+  if (!value) return fallback;
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map((item) => item.msg || item).join("; ");
   return String(value);
@@ -342,17 +343,31 @@ function showConfirmError(message) {
 
 let confirmBusy = false;
 
+function setConfirmAction(action, title, message, okLabel, danger) {
+  const overlay = document.getElementById("confirm-overlay");
+  const heading = document.getElementById("confirm-title");
+  const text = document.getElementById("confirm-message");
+  const ok = document.getElementById("confirm-ok");
+  if (!overlay || !heading || !text || !ok) return;
+  overlay.setAttribute("data-action", action);
+  heading.textContent = title;
+  text.textContent = message;
+  ok.textContent = okLabel;
+  ok.classList.toggle("danger", Boolean(danger));
+  ok.disabled = false;
+  overlay.classList.remove("hidden");
+}
+
 function confirmUnmount(device, mountpoint) {
   const overlay = document.getElementById("confirm-overlay");
-  const message = document.getElementById("confirm-message");
-  const ok = document.getElementById("confirm-ok");
-  const cancel = document.getElementById("confirm-cancel");
-  if (!overlay || !message || !ok || !cancel) return;
-  message.textContent = `Unmount ${device} from ${mountpoint}?`;
-  overlay.classList.remove("hidden");
+  if (!overlay) return;
   overlay.setAttribute("data-device", device);
   overlay.setAttribute("data-mountpoint", mountpoint);
-  ok.disabled = false;
+  setConfirmAction("unmount", "Unmount USB Drive", `Unmount ${device} from ${mountpoint}?`, "Unmount", true);
+}
+
+function confirmMount() {
+  setConfirmAction("mount", "Mount USB Drive", "Mount USB drive at /mnt/usb?", "Mount", false);
 }
 
 function bindConfirmModal() {
@@ -370,15 +385,20 @@ function bindConfirmModal() {
   ok.addEventListener("click", async (event) => {
     event.preventDefault();
     if (confirmBusy) return;
+    const action = overlay.getAttribute("data-action") || "unmount";
     const device = overlay.getAttribute("data-device") || "";
     const mountpoint = overlay.getAttribute("data-mountpoint") || "";
     confirmBusy = true;
     ok.disabled = true;
     try {
-      await unmountDrive(device, mountpoint);
+      if (action === "mount") {
+        await mountDrive();
+      } else {
+        await unmountDrive(device, mountpoint);
+      }
       closeConfirm();
     } catch (err) {
-      showConfirmError(err.message || "Unmount failed");
+      showConfirmError(err.message || (action === "mount" ? "Mount failed" : "Unmount failed"));
     } finally {
       confirmBusy = false;
       ok.disabled = false;
@@ -391,6 +411,13 @@ function bindUsbGrid() {
   if (!grid || grid.dataset.bound === "1") return;
   grid.dataset.bound = "1";
   grid.addEventListener("click", (event) => {
+    const mountBtn = event.target.closest(".usb-mount");
+    if (mountBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmMount();
+      return;
+    }
     const btn = event.target.closest(".usb-unmount");
     if (!btn) return;
     event.preventDefault();
@@ -409,9 +436,23 @@ async function unmountDrive(device, mountpoint) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(errorDetail(data.detail));
+    throw new Error(errorDetail(data.detail, "Unmount failed"));
   }
   renderUsbDrives([]);
+  await loadDashboard(true);
+}
+
+async function mountDrive() {
+  const headers = Object.assign({ "Content-Type": "application/json" }, await csrfHeader());
+  const res = await fetch("/api/usb/mount", {
+    method: "POST",
+    headers,
+    credentials: "same-origin",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(errorDetail(data.detail, "Mount failed"));
+  }
   await loadDashboard(true);
 }
 

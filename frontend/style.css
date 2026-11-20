@@ -511,7 +511,8 @@ html[data-theme="light"] .stat.temp-unknown {
   z-index: 2;
 }
 
-.usb-unmount {
+.usb-unmount,
+.usb-mount {
   pointer-events: auto;
   cursor: pointer;
   position: relative;

@@ -864,6 +864,11 @@ def hide_usb_mount(mountpoint: str) -> None:
         _HIDDEN_MOUNTS[mountpoint] = time.monotonic()
 
 
+def unhide_usb_mount(mountpoint: str) -> None:
+    if mountpoint:
+        _HIDDEN_MOUNTS.pop(mountpoint, None)
+
+
 def _is_hidden_mount(mountpoint: str) -> bool:
     hidden_at = _HIDDEN_MOUNTS.get(mountpoint)
     if hidden_at is None:
