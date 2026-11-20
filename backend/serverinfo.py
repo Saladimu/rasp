@@ -10,6 +10,8 @@ from .config import settings
 
 _CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
 _CACHE_TTL = 5.0
+_HIDDEN_MOUNTS: dict[str, float] = {}
+_HIDDEN_TTL = 45.0
 _cpu_primed = False
 _cpu_model_cache: str | None = None
 
@@ -714,6 +716,50 @@ def _mount_usage(mountpoint: str) -> tuple[int, int] | None:
     return None
 
 
+def hide_usb_mount(mountpoint: str) -> None:
+    if mountpoint:
+        _HIDDEN_MOUNTS[mountpoint] = time.monotonic()
+
+
+def _is_hidden_mount(mountpoint: str) -> bool:
+    hidden_at = _HIDDEN_MOUNTS.get(mountpoint)
+    if hidden_at is None:
+        return False
+    if time.monotonic() - hidden_at > _HIDDEN_TTL:
+        _HIDDEN_MOUNTS.pop(mountpoint, None)
+        return False
+    return True
+
+
+def _findmnt_active(mountpoint: str, device: str = "") -> bool:
+    args = ["findmnt", "-n", "-o", "SOURCE,TARGET", "--target", mountpoint]
+    commands: list[list[str]] = []
+    nsenter = shutil.which("nsenter")
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        commands.append([nsenter, "-t", "1", "-m", "--", *args])
+    commands.append(args)
+    ran = False
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        ran = True
+        text = f"{completed.stdout or ''}\n{completed.stderr or ''}"
+        if completed.returncode != 0 or mountpoint not in text:
+            return False
+        if device and os.path.basename(device) not in text and device not in text:
+            return False
+        return True
+    return not ran
+
+
 def _usable_usb_mount(device: str, mountpoint: str, fstype: str) -> bool:
     if not device.startswith("/dev/"):
         return False
@@ -723,7 +769,9 @@ def _usable_usb_mount(device: str, mountpoint: str, fstype: str) -> bool:
         return False
     if any(mountpoint == prefix or mountpoint.startswith(prefix + "/") for prefix in _SKIP_MOUNT_PREFIXES):
         return False
-    return _is_usb_drive(device)
+    if not _is_usb_drive(device):
+        return False
+    return _findmnt_active(mountpoint, device)
 
 
 def collect_usb_drives() -> list[dict[str, Any]]:
@@ -731,7 +779,7 @@ def collect_usb_drives() -> list[dict[str, Any]]:
     seen: set[str] = set()
     try:
         for device, mountpoint, fstype in _host_mounts():
-            if mountpoint in seen or not _usable_usb_mount(device, mountpoint, fstype):
+            if mountpoint in seen or _is_hidden_mount(mountpoint) or not _usable_usb_mount(device, mountpoint, fstype):
                 continue
             usage = _mount_usage(mountpoint)
             if not usage:
@@ -750,6 +798,7 @@ def collect_usb_drives() -> list[dict[str, Any]]:
                     "use_pct": f"{use_pct:.1f}%",
                     "used_bytes": used,
                     "total_bytes": total,
+                    "status": "mounted",
                 }
             )
             seen.add(mountpoint)
@@ -763,7 +812,10 @@ def collect_server_info() -> dict[str, Any]:
     now = time.monotonic()
     cached = _CACHE["data"]
     if cached and now - _CACHE["ts"] < _CACHE_TTL:
-        return cached
+        fresh = dict(cached)
+        fresh["usb_drives"] = collect_usb_drives()
+        _CACHE["data"] = fresh
+        return fresh
 
     hostname = settings.server_hostname.strip() or socket.gethostname() or "Not Available"
     cpu = "Not Available"

@@ -462,12 +462,18 @@ def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dic
             raise HTTPException(status_code=400, detail="Mountpoint not found or not mounted")
         if device not in output and Path(device).name not in output:
             raise HTTPException(status_code=400, detail="Device does not match the mounted path")
-        result = _host_run(["umount", "-l", mountpoint], timeout=10)
+        result = _host_run(["umount", mountpoint], timeout=10)
         if result is None or result.returncode != 0:
-            result = _host_run(["umount", mountpoint], timeout=10)
+            result = _host_run(["umount", "-l", mountpoint], timeout=10)
         if result is None or result.returncode != 0:
             detail = ((result.stderr if result else "") or (result.stdout if result else "") or "Unmount failed").strip()
             raise HTTPException(status_code=500, detail=detail)
+        still = _host_run(["findmnt", "-n", "-o", "TARGET", "--target", mountpoint], timeout=5)
+        if still and still.returncode == 0 and mountpoint in (still.stdout or ""):
+            raise HTTPException(status_code=500, detail="Drive is still mounted")
+        from .serverinfo import hide_usb_mount
+
+        hide_usb_mount(mountpoint)
         _clear_server_cache()
         return {"ok": True, "message": f"Successfully unmounted {device} from {mountpoint}"}
     except HTTPException:

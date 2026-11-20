@@ -518,6 +518,16 @@ html[data-theme="light"] .stat.temp-unknown {
   z-index: 3;
 }
 
+.usb-empty {
+  opacity: 0.86;
+}
+
+.usb-empty .usb-meta span,
+.usb-empty p,
+.usb-empty .latency {
+  color: var(--muted);
+}
+
 .confirm-modal {
   width: min(420px, 100%);
   max-height: none;

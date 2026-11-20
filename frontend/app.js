@@ -249,13 +249,35 @@ function usbButtonId(device) {
   return `unmount-${String(device || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
+function emptyUsbCard() {
+  return `
+    <article class="card card-unknown usb-card usb-empty">
+      <div class="card-head usb-head">
+        <div class="icon-wrap">${iconMarkup("usb")}</div>
+        <h2>USB Drive</h2>
+        <div class="status"><span class="dot unknown"></span>Unmounted</div>
+      </div>
+      <p>No USB drive mounted</p>
+      <div class="usb-meta">
+        <span>Label: —</span>
+        <span>Firmware: —</span>
+        <span>Used / Size: —</span>
+        <span>Use%: —</span>
+      </div>
+      <div class="card-foot">
+        <div class="latency">Waiting for a USB drive</div>
+      </div>
+    </article>
+  `;
+}
+
 function renderUsbDrives(drives) {
   const grid = document.getElementById("usb-grid");
   const toolbar = document.getElementById("usb-toolbar");
   if (!grid) return;
   if (toolbar) toolbar.style.display = "";
   if (!drives || drives.length === 0) {
-    grid.innerHTML = "<p class='muted'>No USB drives mounted.</p>";
+    grid.innerHTML = emptyUsbCard();
     return;
   }
   grid.innerHTML = drives.map((drive) => `
@@ -387,6 +409,7 @@ async function unmountDrive(device, mountpoint) {
   if (!res.ok) {
     throw new Error(errorDetail(data.detail));
   }
+  renderUsbDrives([]);
   await loadDashboard(true);
 }
 
@@ -419,7 +442,7 @@ async function loadDashboard(refresh = false) {
     applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
-     renderUsbDrives(data.server?.usb_drives || []);
+    renderUsbDrives(data.server?.usb_drives || []);
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");
     if (waiting) {
