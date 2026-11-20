@@ -262,6 +262,7 @@ function emptyUsbCard() {
         <span>Label: —</span>
         <span>Firmware: —</span>
         <span>Used / Size: —</span>
+        <span>Avail: —</span>
         <span>Use%: —</span>
       </div>
       <div class="card-foot">
@@ -292,6 +293,7 @@ function renderUsbDrives(drives) {
         <span>Label: ${escapeHtml(drive.label)}</span>
         <span>Firmware: ${escapeHtml(drive.firmware)}</span>
         <span>Used / Size: ${escapeHtml(drive.used)} / ${escapeHtml(drive.size)}</span>
+        <span>Avail: ${escapeHtml(drive.avail || "—")}</span>
         <span>Use%: ${escapeHtml(drive.use_pct)}</span>
       </div>
       <div class="card-foot">

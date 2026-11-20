@@ -570,6 +570,30 @@ def _host_command(args: list[str]) -> str | None:
     return _run_process(args)
 
 
+def _host_stdout(args: list[str], timeout: int = 3) -> str | None:
+    nsenter = shutil.which("nsenter")
+    commands: list[list[str]] = []
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        commands.append([nsenter, "-t", "1", "-m", "-u", "-i", "-n", "--", *args])
+        commands.append([nsenter, "-t", "1", "-m", "--", *args])
+    commands.append(args)
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        text = (completed.stdout or "").strip()
+        if completed.returncode == 0 and text:
+            return text
+    return None
+
+
 def _get_parent_block_device(device: str) -> str:
     basename = os.path.basename(device or "")
     if not basename:
@@ -684,35 +708,154 @@ def _host_mounts() -> list[tuple[str, str, str]]:
     return mounts
 
 
-def _mount_usage(mountpoint: str) -> tuple[int, int] | None:
-    candidates = [mountpoint]
-    host_path = f"/proc/1/root{mountpoint}"
-    if host_path not in candidates:
-        candidates.append(host_path)
-    try:
-        import psutil
+def _looks_like_root_disk(source: str) -> bool:
+    name = source.lower()
+    return "mmcblk" in name or name in {"overlay", "overlay2", "/", "rootfs"}
 
-        for path in candidates:
-            try:
-                usage = psutil.disk_usage(path)
-            except (OSError, PermissionError):
-                continue
-            if usage.total:
-                return usage.total, usage.used
-    except Exception:
-        pass
-    text = _host_command(["df", "-B1", "--output=size,used,target", mountpoint])
-    if not text:
-        text = _host_command(["df", "-B1", mountpoint])
-    if not text:
-        return None
-    for line in text.splitlines()[1:]:
+
+def _device_matches(source: str, device: str) -> bool:
+    if not device:
+        return True
+    name = os.path.basename(device)
+    return source == device or source.endswith(f"/{name}") or name in source.split("/")[-1]
+
+
+def _root_disk_bytes() -> int:
+    try:
+        stat = os.statvfs("/")
+        return int(stat.f_frsize * stat.f_blocks)
+    except OSError:
+        return 0
+
+
+def _is_root_usage(size: int) -> bool:
+    root = _root_disk_bytes()
+    if not root or size <= 0:
+        return False
+    return abs(size - root) < max(root * 0.05, 64 * 1024 ** 2)
+
+
+def _parse_df_posix(text: str, device: str = "") -> tuple[int, int, int] | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.lower().startswith("filesystem"):
+            continue
+        parts = stripped.split()
+        if len(parts) < 6:
+            continue
+        source, size_text, used_text, avail_text = parts[0], parts[1], parts[2], parts[3]
+        if device and not _device_matches(source, device):
+            continue
+        if _looks_like_root_disk(source):
+            continue
+        try:
+            size, used, avail = int(size_text), int(used_text), int(avail_text)
+        except ValueError:
+            continue
+        if size > 0 and used >= 0 and not _is_root_usage(size):
+            return size, used, avail
+    return None
+
+
+def _parse_lsblk_usage(text: str, device: str = "") -> tuple[int, int, int] | None:
+    device_name = os.path.basename(device or "")
+    for line in text.splitlines():
         parts = line.split()
-        if len(parts) >= 2:
+        if len(parts) < 2:
+            continue
+        source = parts[0]
+        if device and not _device_matches(source, device) and os.path.basename(source) != device_name:
+            continue
+        if _looks_like_root_disk(source):
+            continue
+        numbers: list[int] = []
+        for part in parts[1:]:
             try:
-                return int(parts[0]), int(parts[1])
+                numbers.append(int(part))
             except ValueError:
                 continue
+        if len(numbers) >= 2 and numbers[0] > 0:
+            size, used = numbers[0], numbers[1]
+            if used > size:
+                size, used = used, size
+            if _is_root_usage(size):
+                continue
+            avail = max(size - used, 0)
+            if len(numbers) >= 3 and numbers[2] >= 0:
+                avail = numbers[2] if numbers[2] <= size else avail
+            return size, used, avail
+        if len(numbers) == 1 and numbers[0] > 0 and not _is_root_usage(numbers[0]):
+            return numbers[0], 0, numbers[0]
+    return None
+
+
+def _sysfs_block_bytes(device: str) -> int | None:
+    name = os.path.basename(device or "")
+    parent = _get_parent_block_device(device)
+    paths = [
+        f"/sys/class/block/{name}/size",
+        f"/proc/1/root/sys/class/block/{name}/size",
+    ]
+    if parent:
+        paths.extend(
+            [
+                f"/sys/block/{parent}/{name}/size",
+                f"/proc/1/root/sys/block/{parent}/{name}/size",
+            ]
+        )
+    for path in paths:
+        text = _read_file_safe(path)
+        if text and text.isdigit():
+            return int(text) * 512
+    return None
+
+
+def _parse_findmnt_usage(text: str, device: str = "") -> tuple[int, int, int] | None:
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        numbers: list[int] = []
+        source = ""
+        for part in parts:
+            try:
+                numbers.append(int(part))
+            except ValueError:
+                if part.startswith("/dev/"):
+                    source = part
+        if source and device and not _device_matches(source, device):
+            continue
+        if len(numbers) >= 2 and numbers[0] > 0 and numbers[1] >= 0:
+            size, used = numbers[0], numbers[1]
+            if used > size:
+                size, used = used, size
+            if _is_root_usage(size):
+                continue
+            return size, used, max(size - used, 0)
+    return None
+
+
+def _mount_usage(mountpoint: str, device: str = "") -> tuple[int, int, int] | None:
+    if not device:
+        return None
+    parsed = _parse_df_posix(_host_stdout(["df", "-P", "-B1", device]) or "", device)
+    if parsed:
+        return parsed
+    parsed = _parse_findmnt_usage(
+        _host_stdout(["findmnt", "-b", "-n", "-o", "SIZE,USED,SOURCE", device]) or "",
+        device,
+    )
+    if parsed:
+        return parsed
+    parsed = _parse_lsblk_usage(
+        _host_stdout(["lsblk", "-b", "-n", "-p", "-o", "NAME,FSSIZE,FSUSED,SIZE", device]) or "",
+        device,
+    )
+    if parsed:
+        return parsed
+    size = _sysfs_block_bytes(device)
+    if size and not _is_root_usage(size):
+        return size, 0, size
     return None
 
 
@@ -724,6 +867,9 @@ def hide_usb_mount(mountpoint: str) -> None:
 def _is_hidden_mount(mountpoint: str) -> bool:
     hidden_at = _HIDDEN_MOUNTS.get(mountpoint)
     if hidden_at is None:
+        return False
+    if not _findmnt_active(mountpoint):
+        _HIDDEN_MOUNTS.pop(mountpoint, None)
         return False
     if time.monotonic() - hidden_at > _HIDDEN_TTL:
         _HIDDEN_MOUNTS.pop(mountpoint, None)
@@ -779,13 +925,23 @@ def collect_usb_drives() -> list[dict[str, Any]]:
     seen: set[str] = set()
     try:
         for device, mountpoint, fstype in _host_mounts():
-            if mountpoint in seen or _is_hidden_mount(mountpoint) or not _usable_usb_mount(device, mountpoint, fstype):
+            if mountpoint in seen or not _usable_usb_mount(device, mountpoint, fstype):
                 continue
-            usage = _mount_usage(mountpoint)
-            if not usage:
-                continue
-            total, used = usage
-            use_pct = (used / total * 100) if total > 0 else 0
+            usage = _mount_usage(mountpoint, device)
+            if _is_hidden_mount(mountpoint):
+                if not usage:
+                    continue
+                _HIDDEN_MOUNTS.pop(mountpoint, None)
+            if usage:
+                total, used, avail = usage
+                use_pct = (used / total * 100) if total > 0 else 0
+                used_text = format_gb(used)
+                size_text = format_gb(total)
+                avail_text = format_gb(avail)
+                pct_text = f"{use_pct:.1f}%"
+            else:
+                total = used = avail = 0
+                used_text = size_text = avail_text = pct_text = "Not Available"
             usb_drives.append(
                 {
                     "device": device,
@@ -793,11 +949,13 @@ def collect_usb_drives() -> list[dict[str, Any]]:
                     "fstype": fstype,
                     "label": _get_drive_label(device) or "Unknown",
                     "firmware": _get_drive_firmware(device) or "Unknown",
-                    "used": format_gb(used),
-                    "size": format_gb(total),
-                    "use_pct": f"{use_pct:.1f}%",
+                    "used": used_text,
+                    "size": size_text,
+                    "avail": avail_text,
+                    "use_pct": pct_text,
                     "used_bytes": used,
                     "total_bytes": total,
+                    "avail_bytes": avail,
                     "status": "mounted",
                 }
             )

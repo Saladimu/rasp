@@ -17,9 +17,24 @@ services:
       - /dev:/dev
       - /sys:/sys:ro
       - /run/udev:/run/udev:ro
-      - /media:/media:ro
-      - /mnt:/mnt:ro
-      - /run/media:/run/media:ro
+      - type: bind
+        source: /media
+        target: /media
+        read_only: true
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /mnt
+        target: /mnt
+        read_only: true
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /run/media
+        target: /run/media
+        read_only: true
+        bind:
+          propagation: rslave
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
       interval: 30s
