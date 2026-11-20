@@ -507,6 +507,15 @@ html[data-theme="light"] .stat.temp-unknown {
 
 .usb-card .card-foot {
   margin-top: 12px;
+  position: relative;
+  z-index: 2;
+}
+
+.usb-unmount {
+  pointer-events: auto;
+  cursor: pointer;
+  position: relative;
+  z-index: 3;
 }
 
 .confirm-modal {

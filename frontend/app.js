@@ -274,17 +274,10 @@ function renderUsbDrives(drives) {
       </div>
       <div class="card-foot">
         <div class="latency">${escapeHtml(drive.fstype)} · ${escapeHtml(drive.device)}</div>
-        <button class="btn danger hidden" id="${usbButtonId(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
+        <button class="btn danger usb-unmount" type="button" id="${usbButtonId(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
       </div>
     </article>
   `).join("");
-
-  drives.forEach((drive) => {
-    const btn = document.getElementById(usbButtonId(drive.device));
-    if (btn) {
-      btn.addEventListener("click", () => confirmUnmount(drive.device, drive.mountpoint));
-    }
-  });
 }
 
 async function csrfHeader() {
@@ -323,40 +316,63 @@ function showConfirmError(message) {
   error.classList.add("show");
 }
 
+let confirmBusy = false;
+
 function confirmUnmount(device, mountpoint) {
   const overlay = document.getElementById("confirm-overlay");
   const message = document.getElementById("confirm-message");
   const ok = document.getElementById("confirm-ok");
   const cancel = document.getElementById("confirm-cancel");
-  if (!overlay || !message || !ok || !cancel) {
-    unmountDrive(device, mountpoint);
-    return;
-  }
+  if (!overlay || !message || !ok || !cancel) return;
   message.textContent = `Unmount ${device} from ${mountpoint}?`;
   overlay.classList.remove("hidden");
-  const onCancel = () => {
-    ok.removeEventListener("click", onOk);
-    cancel.removeEventListener("click", onCancel);
-    overlay.removeEventListener("click", onOverlay);
-    closeConfirm();
-  };
-  const onOverlay = (event) => {
-    if (event.target === overlay) onCancel();
-  };
-  const onOk = async () => {
+  overlay.setAttribute("data-device", device);
+  overlay.setAttribute("data-mountpoint", mountpoint);
+  ok.disabled = false;
+}
+
+function bindConfirmModal() {
+  const overlay = document.getElementById("confirm-overlay");
+  const ok = document.getElementById("confirm-ok");
+  const cancel = document.getElementById("confirm-cancel");
+  if (!overlay || !ok || !cancel) return;
+  cancel.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!confirmBusy) closeConfirm();
+  });
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay && !confirmBusy) closeConfirm();
+  });
+  ok.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (confirmBusy) return;
+    const device = overlay.getAttribute("data-device") || "";
+    const mountpoint = overlay.getAttribute("data-mountpoint") || "";
+    confirmBusy = true;
     ok.disabled = true;
     try {
       await unmountDrive(device, mountpoint);
-      onCancel();
+      closeConfirm();
     } catch (err) {
       showConfirmError(err.message || "Unmount failed");
     } finally {
+      confirmBusy = false;
       ok.disabled = false;
     }
-  };
-  ok.addEventListener("click", onOk);
-  cancel.addEventListener("click", onCancel);
-  overlay.addEventListener("click", onOverlay);
+  });
+}
+
+function bindUsbGrid() {
+  const grid = document.getElementById("usb-grid");
+  if (!grid || grid.dataset.bound === "1") return;
+  grid.dataset.bound = "1";
+  grid.addEventListener("click", (event) => {
+    const btn = event.target.closest(".usb-unmount");
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    confirmUnmount(btn.getAttribute("data-device") || "", btn.getAttribute("data-mountpoint") || "");
+  });
 }
 
 async function unmountDrive(device, mountpoint) {
@@ -403,8 +419,7 @@ async function loadDashboard(refresh = false) {
     applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
-    renderUsbDrives(data.server?.usb_drives || []);
-    updateUnmountButtons();
+     renderUsbDrives(data.server?.usb_drives || []);
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");
     if (waiting) {
@@ -426,14 +441,6 @@ async function checkAdminSession() {
   } catch (_err) {
     return false;
   }
-}
-
-function updateUnmountButtons() {
-  checkAdminSession().then((isAdmin) => {
-    document.querySelectorAll("button[id^='unmount-']").forEach((btn) => {
-      btn.classList.toggle("hidden", !isAdmin);
-    });
-  });
 }
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
@@ -459,6 +466,8 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
+bindUsbGrid();
+bindConfirmModal();
 renderClock();
 setInterval(renderClock, 1000);
 initTheme();
