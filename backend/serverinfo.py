@@ -34,6 +34,13 @@ def format_bytes(value: int) -> str:
     return f"{value} B"
 
 
+def format_gb(value: int) -> str:
+    gb = max(value, 0) / (1024 ** 3)
+    if gb >= 10:
+        return f"{gb:.1f} GB"
+    return f"{gb:.2f} GB"
+
+
 def cpu_model_name() -> str:
     global _cpu_model_cache
     if _cpu_model_cache:
@@ -738,8 +745,8 @@ def collect_usb_drives() -> list[dict[str, Any]]:
                     "fstype": fstype,
                     "label": _get_drive_label(device) or "Unknown",
                     "firmware": _get_drive_firmware(device) or "Unknown",
-                    "used": format_bytes(used),
-                    "size": format_bytes(total),
+                    "used": format_gb(used),
+                    "size": format_gb(total),
                     "use_pct": f"{use_pct:.1f}%",
                     "used_bytes": used,
                     "total_bytes": total,

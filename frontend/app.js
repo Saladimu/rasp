@@ -245,6 +245,10 @@ function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
   }).join("") || `<p class='muted'>${emptyText}</p>`;
 }
 
+function usbButtonId(device) {
+  return `unmount-${String(device || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
 function renderUsbDrives(drives) {
   const grid = document.getElementById("usb-grid");
   const toolbar = document.getElementById("usb-toolbar");
@@ -255,31 +259,28 @@ function renderUsbDrives(drives) {
     return;
   }
   grid.innerHTML = drives.map((drive) => `
-    <article class="card card-online">
-      <div class="card-head">
+    <article class="card card-online usb-card">
+      <div class="card-head usb-head">
         <div class="icon-wrap">${iconMarkup("usb")}</div>
+        <h2>USB Drive</h2>
         <div class="status"><span class="dot online"></span>Mounted</div>
       </div>
-      <h2>USB Drive${drive.label && drive.label !== "Unknown" ? `: ${escapeHtml(drive.label)}` : ""}</h2>
       <p>${escapeHtml(drive.mountpoint)}</p>
-      <div class="uptime-row">
-        <div class="uptime-meta">
-          <strong>Label:</strong> ${escapeHtml(drive.label)}<br>
-          <strong>Firmware:</strong> ${escapeHtml(drive.firmware)}<br>
-          <strong>Used / Size:</strong> ${escapeHtml(drive.used)} / ${escapeHtml(drive.size)}<br>
-          <strong>Use%:</strong> ${escapeHtml(drive.use_pct)}
-        </div>
+      <div class="usb-meta">
+        <span>Label: ${escapeHtml(drive.label)}</span>
+        <span>Firmware: ${escapeHtml(drive.firmware)}</span>
+        <span>Used / Size: ${escapeHtml(drive.used)} / ${escapeHtml(drive.size)}</span>
+        <span>Use%: ${escapeHtml(drive.use_pct)}</span>
       </div>
       <div class="card-foot">
-        <div class="latency">${escapeHtml(drive.fstype)}<br>${escapeHtml(drive.device)}</div>
-        <button class="btn danger hidden" id="unmount-${escapeAttr(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
+        <div class="latency">${escapeHtml(drive.fstype)} · ${escapeHtml(drive.device)}</div>
+        <button class="btn danger hidden" id="${usbButtonId(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
       </div>
     </article>
   `).join("");
 
-  // Attach unmount button handlers
   drives.forEach((drive) => {
-    const btn = document.getElementById(`unmount-${drive.device}`);
+    const btn = document.getElementById(usbButtonId(drive.device));
     if (btn) {
       btn.addEventListener("click", () => unmountDrive(drive.device, drive.mountpoint));
     }

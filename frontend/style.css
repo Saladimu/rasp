@@ -476,6 +476,39 @@ html[data-theme="light"] .stat.temp-unknown {
   gap: 12px;
 }
 
+.usb-card {
+  min-height: 0;
+  padding: 14px 16px 16px;
+}
+
+.usb-head {
+  align-items: center;
+}
+
+.usb-head h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 1.05rem;
+}
+
+.usb-card p {
+  margin: 8px 0 0;
+  flex: 0 0 auto;
+}
+
+.usb-meta {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.usb-card .card-foot {
+  margin-top: 12px;
+}
+
 .icon-wrap {
   width: 46px;
   height: 46px;
