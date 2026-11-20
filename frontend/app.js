@@ -282,28 +282,96 @@ function renderUsbDrives(drives) {
   drives.forEach((drive) => {
     const btn = document.getElementById(usbButtonId(drive.device));
     if (btn) {
-      btn.addEventListener("click", () => unmountDrive(drive.device, drive.mountpoint));
+      btn.addEventListener("click", () => confirmUnmount(drive.device, drive.mountpoint));
     }
   });
 }
 
-async function unmountDrive(device, mountpoint) {
-  if (!window.confirm(`Unmount ${device} (${mountpoint})?`)) return;
+async function csrfHeader() {
   try {
-    const res = await fetch("/api/usb/unmount", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device, mountpoint }),
-      credentials: "same-origin",
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Unmount failed");
-    }
-    await loadDashboard(true);
-  } catch (err) {
-    alert(err.message);
+    const res = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) return {};
+    const data = await res.json();
+    if (!data.authenticated || !data.csrf_token) return {};
+    return { "X-CSRF-Token": data.csrf_token };
+  } catch (_err) {
+    return {};
   }
+}
+
+function errorDetail(value) {
+  if (!value) return "Unmount failed";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((item) => item.msg || item).join("; ");
+  return String(value);
+}
+
+function closeConfirm() {
+  const overlay = document.getElementById("confirm-overlay");
+  const error = document.getElementById("confirm-error");
+  if (overlay) overlay.classList.add("hidden");
+  if (error) {
+    error.textContent = "";
+    error.classList.remove("show");
+  }
+}
+
+function showConfirmError(message) {
+  const error = document.getElementById("confirm-error");
+  if (!error) return;
+  error.textContent = message;
+  error.classList.add("show");
+}
+
+function confirmUnmount(device, mountpoint) {
+  const overlay = document.getElementById("confirm-overlay");
+  const message = document.getElementById("confirm-message");
+  const ok = document.getElementById("confirm-ok");
+  const cancel = document.getElementById("confirm-cancel");
+  if (!overlay || !message || !ok || !cancel) {
+    unmountDrive(device, mountpoint);
+    return;
+  }
+  message.textContent = `Unmount ${device} from ${mountpoint}?`;
+  overlay.classList.remove("hidden");
+  const onCancel = () => {
+    ok.removeEventListener("click", onOk);
+    cancel.removeEventListener("click", onCancel);
+    overlay.removeEventListener("click", onOverlay);
+    closeConfirm();
+  };
+  const onOverlay = (event) => {
+    if (event.target === overlay) onCancel();
+  };
+  const onOk = async () => {
+    ok.disabled = true;
+    try {
+      await unmountDrive(device, mountpoint);
+      onCancel();
+    } catch (err) {
+      showConfirmError(err.message || "Unmount failed");
+    } finally {
+      ok.disabled = false;
+    }
+  };
+  ok.addEventListener("click", onOk);
+  cancel.addEventListener("click", onCancel);
+  overlay.addEventListener("click", onOverlay);
+}
+
+async function unmountDrive(device, mountpoint) {
+  const headers = Object.assign({ "Content-Type": "application/json" }, await csrfHeader());
+  const res = await fetch("/api/usb/unmount", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ device, mountpoint }),
+    credentials: "same-origin",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(errorDetail(data.detail));
+  }
+  await loadDashboard(true);
 }
 
 function escapeHtml(value) {

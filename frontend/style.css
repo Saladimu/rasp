@@ -509,6 +509,20 @@ html[data-theme="light"] .stat.temp-unknown {
   margin-top: 12px;
 }
 
+.confirm-modal {
+  width: min(420px, 100%);
+  max-height: none;
+}
+
+.confirm-modal .modal-body p {
+  margin: 0;
+  color: var(--text);
+}
+
+.confirm-modal .alert {
+  margin-top: 12px;
+}
+
 .icon-wrap {
   width: 46px;
   height: 46px;

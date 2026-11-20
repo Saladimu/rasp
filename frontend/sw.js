@@ -1,8 +1,8 @@
-const CACHE_NAME = "home-server-v14";
+const CACHE_NAME = "home-server-v15";
 const PRECACHE = [
   "/",
-  "/static/style.css?v=14",
-  "/static/app.js?v=13",
+  "/static/style.css?v=15",
+  "/static/app.js?v=14",
   "/static/favicon.svg",
 ];
 

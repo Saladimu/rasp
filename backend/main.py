@@ -419,16 +419,30 @@ def _host_run(args: list[str], timeout: int = 5):
     import subprocess
 
     nsenter = shutil.which("nsenter")
-    command = args
+    attempts = []
     if nsenter and Path("/proc/1/ns/mnt").exists():
-        command = [nsenter, "-t", "1", "-m", "--", *args]
-    return subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+        attempts.append([nsenter, "-t", "1", "-m", "-u", "-i", "-n", "--", *args])
+        attempts.append([nsenter, "-t", "1", "-m", "--", *args])
+    attempts.append(args)
+    last = None
+    for command in attempts:
+        last = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if last.returncode == 0:
+            return last
+    return last
+
+
+def _clear_server_cache() -> None:
+    from .serverinfo import _CACHE
+
+    _CACHE["data"] = None
+    _CACHE["ts"] = 0.0
 
 
 @app.post("/api/usb/unmount")
@@ -443,19 +457,18 @@ def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dic
         raise HTTPException(status_code=400, detail="Invalid block device")
     try:
         result = _host_run(["findmnt", "-n", "-o", "SOURCE,TARGET", mountpoint], timeout=5)
-        output = f"{result.stdout or ''}\n{result.stderr or ''}"
-        if result.returncode != 0 or mountpoint not in output:
+        output = f"{(result.stdout if result else '') or ''}\n{(result.stderr if result else '') or ''}"
+        if not result or result.returncode != 0 or mountpoint not in output:
             raise HTTPException(status_code=400, detail="Mountpoint not found or not mounted")
         if device not in output and Path(device).name not in output:
             raise HTTPException(status_code=400, detail="Device does not match the mounted path")
-        result = _host_run(["umount", mountpoint], timeout=10)
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "Unmount failed").strip()
+        result = _host_run(["umount", "-l", mountpoint], timeout=10)
+        if result is None or result.returncode != 0:
+            result = _host_run(["umount", mountpoint], timeout=10)
+        if result is None or result.returncode != 0:
+            detail = ((result.stderr if result else "") or (result.stdout if result else "") or "Unmount failed").strip()
             raise HTTPException(status_code=500, detail=detail)
-        from .serverinfo import _CACHE
-
-        _CACHE["data"] = None
-        _CACHE["ts"] = 0.0
+        _clear_server_cache()
         return {"ok": True, "message": f"Successfully unmounted {device} from {mountpoint}"}
     except HTTPException:
         raise

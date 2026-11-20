@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=14">
+  <link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body>
   <div class="shell">
@@ -79,6 +79,21 @@
     </div>
     <section class="grid" id="website-grid"></section>
   </div>
-  <script src="/static/app.js?v=13"></script>
+  <div class="modal-overlay hidden" id="confirm-overlay">
+    <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="modal-header">
+        <h2 id="confirm-title">Unmount USB Drive</h2>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-message">Unmount this drive?</p>
+        <div class="alert" id="confirm-error"></div>
+      </div>
+      <div class="modal-footer actions">
+        <button class="btn secondary" id="confirm-cancel" type="button">Cancel</button>
+        <button class="btn danger" id="confirm-ok" type="button">Unmount</button>
+      </div>
+    </div>
+  </div>
+  <script src="/static/app.js?v=14"></script>
 </body>
 </html>
