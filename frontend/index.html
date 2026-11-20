@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
   <div class="shell">
@@ -55,7 +55,13 @@
       <div class="stat"><span>Uptime</span><strong id="stat-uptime">Not Available</strong></div>
     </section>
 
-    <section class="grid" id="usb-grid" style="display: none;"></section>
+    <div class="toolbar" id="usb-toolbar">
+      <div>
+        <h2 class="section-title">USB Drives</h2>
+        <p class="muted">Removable storage attached to the Raspberry Pi.</p>
+      </div>
+    </div>
+    <section class="grid" id="usb-grid"></section>
 
     <div class="toolbar">
       <div>
@@ -73,6 +79,6 @@
     </div>
     <section class="grid" id="website-grid"></section>
   </div>
-  <script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=12"></script>
 </body>
 </html>

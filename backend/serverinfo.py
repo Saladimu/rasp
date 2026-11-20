@@ -512,130 +512,243 @@ def _read_meminfo_swap(path: str) -> tuple[int, int] | None:
         return None
 
 
-def _get_drive_label(device: str) -> str | None:
-    """Get the filesystem label for a block device."""
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["blkid", "-o", "value", "-s", "LABEL", device],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        label = result.stdout.strip()
-        return label if label else None
-    except Exception:
-        return None
+_SKIP_FS = {
+    "proc",
+    "sysfs",
+    "cgroup",
+    "cgroup2",
+    "tmpfs",
+    "devtmpfs",
+    "devpts",
+    "overlay",
+    "squashfs",
+    "autofs",
+    "fuse.portal",
+    "fusectl",
+    "rpc_pipefs",
+    "securityfs",
+    "pstore",
+    "bpf",
+    "tracefs",
+    "debugfs",
+    "configfs",
+    "hugetlbfs",
+    "mqueue",
+    "binfmt_misc",
+    "nsfs",
+    "ramfs",
+    "iso9660",
+}
+
+_SKIP_MOUNT_PREFIXES = (
+    "/proc",
+    "/sys",
+    "/dev",
+    "/run/docker",
+    "/var/lib/docker",
+    "/var/lib/containerd",
+    "/boot",
+    "/snap",
+)
 
 
-def _get_drive_firmware(device: str) -> str | None:
-    """Get the firmware/model info for a block device."""
-    # Use parent block device for sysfs
-    parent_device = _get_parent_block_device(device)
-    base_path = f"/sys/block/{parent_device}"
-    for attr in ("device/model", "device/vendor", "model"):
-        path = os.path.join(base_path, attr)
-        try:
-            with open(path, encoding="utf-8") as handle:
-                value = handle.read().strip()
-                if value:
-                    return value
-        except OSError:
-            continue
-    # Fallback to lsblk with parent device
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["lsblk", "-no", "MODEL", f"/dev/{parent_device}"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        model = result.stdout.strip()
-        return model if model else None
-    except Exception:
-        return None
+def _host_command(args: list[str]) -> str | None:
+    nsenter = shutil.which("nsenter")
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        text = _run_process([nsenter, "-t", "1", "-m", "--", *args])
+        if text:
+            return text
+    return _run_process(args)
 
 
 def _get_parent_block_device(device: str) -> str:
-    """Extract parent block device from partition device.
-    e.g., /dev/sda1 -> sda, /dev/nvme0n1p1 -> nvme0n1
-    """
-    import re
-    basename = os.path.basename(device)
-    # Remove trailing digits (partition number)
-    parent = re.sub(r'\d+$', '', basename)
-    return parent
+    basename = os.path.basename(device or "")
+    if not basename:
+        return ""
+    if basename.startswith(("nvme", "mmcblk", "loop", "nbd")):
+        return re.sub(r"p\d+$", "", basename)
+    return re.sub(r"\d+$", "", basename)
 
 
-def _is_usb_drive(device: str) -> bool:
-    """Check if a block device is a USB drive."""
-    # Get parent block device (e.g., sda from sda1)
-    parent_device = _get_parent_block_device(device)
-    base_path = f"/sys/block/{parent_device}"
-    # Check if it's a removable device
-    removable_path = os.path.join(base_path, "removable")
-    try:
-        with open(removable_path, encoding="utf-8") as handle:
-            if handle.read().strip() == "1":
-                # Also check if it's USB
-                uevent_path = os.path.join(base_path, "device/uevent")
-                try:
-                    with open(uevent_path, encoding="utf-8") as handle:
-                        content = handle.read()
-                        if "USB" in content.upper():
-                            return True
-                except OSError:
-                    pass
-    except OSError:
-        pass
+def _sys_block_roots(name: str) -> list[str]:
+    roots = [f"/sys/block/{name}", f"/proc/1/root/sys/block/{name}"]
+    seen: list[str] = []
+    for path in roots:
+        if path not in seen:
+            seen.append(path)
+    return seen
+
+
+def _sysfs_usb(name: str) -> bool:
+    if not name or name.startswith(("loop", "ram", "zram", "dm-", "md", "sr")):
+        return False
+    for base in _sys_block_roots(name):
+        if not os.path.isdir(base):
+            continue
+        try:
+            real = os.path.realpath(os.path.join(base, "device"))
+            if "/usb" in real.lower():
+                return True
+        except OSError:
+            pass
+        for rel in ("device/uevent", "uevent"):
+            text = (_read_file_safe(os.path.join(base, rel), collapse=False) or "").upper()
+            if "USB" in text or "DRIVER=USB-STORAGE" in text:
+                return True
     return False
 
 
-def collect_usb_drives() -> list[dict[str, Any]]:
-    """Collect information about mounted USB drives."""
-    usb_drives = []
+def _lsblk_transport(name: str) -> str:
+    device = name if name.startswith("/dev/") else f"/dev/{name}"
+    text = _host_command(["lsblk", "-no", "TRAN", device]) or ""
+    return text.split("\n", 1)[0].strip().lower()
+
+
+def _is_usb_drive(device: str) -> bool:
+    parent = _get_parent_block_device(device)
+    if not parent:
+        return False
+    if _sysfs_usb(parent):
+        return True
+    return _lsblk_transport(parent) == "usb" or _lsblk_transport(device) == "usb"
+
+
+def _get_drive_label(device: str) -> str | None:
+    for args in (
+        ["blkid", "-o", "value", "-s", "LABEL", device],
+        ["lsblk", "-no", "LABEL", device],
+    ):
+        label = (_host_command(args) or "").split("\n", 1)[0].strip()
+        if label:
+            return label
+    return None
+
+
+def _get_drive_firmware(device: str) -> str | None:
+    parent = _get_parent_block_device(device)
+    for attr in ("device/model", "device/vendor", "device/rev"):
+        for base in _sys_block_roots(parent):
+            value = _read_file_safe(os.path.join(base, attr))
+            if value:
+                return value
+    model = (_host_command(["lsblk", "-no", "MODEL,VENDOR", f"/dev/{parent}"]) or "").split("\n", 1)[0].strip()
+    return model or None
+
+
+def _parse_mounts(path: str) -> list[tuple[str, str, str]]:
+    mounts: list[tuple[str, str, str]] = []
+    text = _read_file_safe(path, collapse=False)
+    if not text:
+        return mounts
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        device, mountpoint, fstype = parts[0], parts[1], parts[2]
+        mountpoint = mountpoint.replace("\\040", " ")
+        mounts.append((device, mountpoint, fstype))
+    return mounts
+
+
+def _host_mounts() -> list[tuple[str, str, str]]:
+    seen: set[tuple[str, str]] = set()
+    mounts: list[tuple[str, str, str]] = []
+    for path in ("/proc/1/mounts", "/proc/mounts"):
+        for device, mountpoint, fstype in _parse_mounts(path):
+            key = (device, mountpoint)
+            if key in seen:
+                continue
+            seen.add(key)
+            mounts.append((device, mountpoint, fstype))
+    text = _host_command(["findmnt", "-r", "-n", "-o", "SOURCE,TARGET,FSTYPE"])
+    if text:
+        for line in text.splitlines():
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            device, mountpoint, fstype = parts[0], parts[1].replace("\\x20", " "), parts[2]
+            key = (device, mountpoint)
+            if key in seen:
+                continue
+            seen.add(key)
+            mounts.append((device, mountpoint, fstype))
+    return mounts
+
+
+def _mount_usage(mountpoint: str) -> tuple[int, int] | None:
+    candidates = [mountpoint]
+    host_path = f"/proc/1/root{mountpoint}"
+    if host_path not in candidates:
+        candidates.append(host_path)
     try:
         import psutil
-        partitions = psutil.disk_partitions(all=True)
-        for part in partitions:
-            device = part.device
-            mountpoint = part.mountpoint
-            fstype = part.fstype
 
-            # Skip non-USB devices
-            if not _is_usb_drive(device):
-                continue
-
-            # Get usage info
+        for path in candidates:
             try:
-                usage = psutil.disk_usage(mountpoint)
+                usage = psutil.disk_usage(path)
             except (OSError, PermissionError):
                 continue
-
-            label = _get_drive_label(device)
-            firmware = _get_drive_firmware(device)
-
-            used_gb = usage.used / (1024 ** 3)
-            total_gb = usage.total / (1024 ** 3)
-            use_pct = (usage.used / usage.total * 100) if usage.total > 0 else 0
-
-            usb_drives.append({
-                "device": device,
-                "mountpoint": mountpoint,
-                "fstype": fstype,
-                "label": label or "Unknown",
-                "firmware": firmware or "Unknown",
-                "used": format_bytes(usage.used),
-                "size": format_bytes(usage.total),
-                "use_pct": f"{use_pct:.1f}%",
-                "used_bytes": usage.used,
-                "total_bytes": usage.total,
-            })
+            if usage.total:
+                return usage.total, usage.used
     except Exception:
         pass
+    text = _host_command(["df", "-B1", "--output=size,used,target", mountpoint])
+    if not text:
+        text = _host_command(["df", "-B1", mountpoint])
+    if not text:
+        return None
+    for line in text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                return int(parts[0]), int(parts[1])
+            except ValueError:
+                continue
+    return None
+
+
+def _usable_usb_mount(device: str, mountpoint: str, fstype: str) -> bool:
+    if not device.startswith("/dev/"):
+        return False
+    if fstype.lower() in _SKIP_FS:
+        return False
+    if not mountpoint or mountpoint == "/":
+        return False
+    if any(mountpoint == prefix or mountpoint.startswith(prefix + "/") for prefix in _SKIP_MOUNT_PREFIXES):
+        return False
+    return _is_usb_drive(device)
+
+
+def collect_usb_drives() -> list[dict[str, Any]]:
+    usb_drives: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        for device, mountpoint, fstype in _host_mounts():
+            if mountpoint in seen or not _usable_usb_mount(device, mountpoint, fstype):
+                continue
+            usage = _mount_usage(mountpoint)
+            if not usage:
+                continue
+            total, used = usage
+            use_pct = (used / total * 100) if total > 0 else 0
+            usb_drives.append(
+                {
+                    "device": device,
+                    "mountpoint": mountpoint,
+                    "fstype": fstype,
+                    "label": _get_drive_label(device) or "Unknown",
+                    "firmware": _get_drive_firmware(device) or "Unknown",
+                    "used": format_bytes(used),
+                    "size": format_bytes(total),
+                    "use_pct": f"{use_pct:.1f}%",
+                    "used_bytes": used,
+                    "total_bytes": total,
+                }
+            )
+            seen.add(mountpoint)
+    except Exception:
+        return usb_drives
+    usb_drives.sort(key=lambda item: item.get("mountpoint") or "")
     return usb_drives
 
 

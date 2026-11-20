@@ -14,6 +14,12 @@ services:
       DASHBOARD_NAME: Saladimu Server
     volumes:
       - ./data:/app/data
+      - /dev:/dev
+      - /sys:/sys:ro
+      - /run/udev:/run/udev:ro
+      - /media:/media:ro
+      - /mnt:/mnt:ro
+      - /run/media:/run/media:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
       interval: 30s

@@ -414,34 +414,49 @@ def logout(response: Response) -> dict[str, Any]:
     return {"ok": True}
 
 
+def _host_run(args: list[str], timeout: int = 5):
+    import shutil
+    import subprocess
+
+    nsenter = shutil.which("nsenter")
+    command = args
+    if nsenter and Path("/proc/1/ns/mnt").exists():
+        command = [nsenter, "-t", "1", "-m", "--", *args]
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
 @app.post("/api/usb/unmount")
 def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
-    """Unmount a USB drive. Requires admin authentication."""
     import subprocess
+
+    mountpoint = payload.mountpoint.strip()
+    device = payload.device.strip()
+    if not mountpoint.startswith("/") or mountpoint in {"/", "/boot", "/boot/firmware"}:
+        raise HTTPException(status_code=400, detail="Refusing to unmount that path")
+    if not device.startswith("/dev/"):
+        raise HTTPException(status_code=400, detail="Invalid block device")
     try:
-        # Verify the mountpoint is actually mounted
-        result = subprocess.run(
-            ["findmnt", "-n", "-o", "TARGET", payload.mountpoint],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if result.returncode != 0 or payload.mountpoint not in result.stdout:
+        result = _host_run(["findmnt", "-n", "-o", "SOURCE,TARGET", mountpoint], timeout=5)
+        output = f"{result.stdout or ''}\n{result.stderr or ''}"
+        if result.returncode != 0 or mountpoint not in output:
             raise HTTPException(status_code=400, detail="Mountpoint not found or not mounted")
-
-        # Unmount the drive
-        result = subprocess.run(
-            ["umount", payload.mountpoint],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        if device not in output and Path(device).name not in output:
+            raise HTTPException(status_code=400, detail="Device does not match the mounted path")
+        result = _host_run(["umount", mountpoint], timeout=10)
         if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Unmount failed: {result.stderr.strip()}")
+            detail = (result.stderr or result.stdout or "Unmount failed").strip()
+            raise HTTPException(status_code=500, detail=detail)
+        from .serverinfo import _CACHE
 
-        return {"ok": True, "message": f"Successfully unmounted {payload.device} from {payload.mountpoint}"}
+        _CACHE["data"] = None
+        _CACHE["ts"] = 0.0
+        return {"ok": True, "message": f"Successfully unmounted {device} from {mountpoint}"}
     except HTTPException:
         raise
     except subprocess.TimeoutExpired:

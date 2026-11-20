@@ -247,11 +247,13 @@ function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
 
 function renderUsbDrives(drives) {
   const grid = document.getElementById("usb-grid");
+  const toolbar = document.getElementById("usb-toolbar");
+  if (!grid) return;
+  if (toolbar) toolbar.style.display = "";
   if (!drives || drives.length === 0) {
-    grid.style.display = "none";
+    grid.innerHTML = "<p class='muted'>No USB drives mounted.</p>";
     return;
   }
-  grid.style.display = "grid";
   grid.innerHTML = drives.map((drive) => `
     <article class="card card-online">
       <div class="card-head">
