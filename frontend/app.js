@@ -17,6 +17,7 @@ const ICONS = {
   box: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v10"/></svg>',
   cpu: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
   "hard-drive": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h12l4 8H2zM2 12h20v8H2z"/><path d="M6 16h.01M10 16h.01"/></svg>',
+  usb: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"/><path d="M4 9h16"/><path d="M6 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/></svg>',
   wifi: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5a11 11 0 0 1 14 0M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="20" r="1"/></svg>',
   lock: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   user: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>',
@@ -244,6 +245,64 @@ function renderCards(targetId, items, statuses, emptyText, buttonLabel) {
   }).join("") || `<p class='muted'>${emptyText}</p>`;
 }
 
+function renderUsbDrives(drives) {
+  const grid = document.getElementById("usb-grid");
+  if (!drives || drives.length === 0) {
+    grid.style.display = "none";
+    return;
+  }
+  grid.style.display = "grid";
+  grid.innerHTML = drives.map((drive) => `
+    <article class="card card-online">
+      <div class="card-head">
+        <div class="icon-wrap">${iconMarkup("usb")}</div>
+        <div class="status"><span class="dot online"></span>Mounted</div>
+      </div>
+      <h2>USB Drive${drive.label && drive.label !== "Unknown" ? `: ${escapeHtml(drive.label)}` : ""}</h2>
+      <p>${escapeHtml(drive.mountpoint)}</p>
+      <div class="uptime-row">
+        <div class="uptime-meta">
+          <strong>Label:</strong> ${escapeHtml(drive.label)}<br>
+          <strong>Firmware:</strong> ${escapeHtml(drive.firmware)}<br>
+          <strong>Used / Size:</strong> ${escapeHtml(drive.used)} / ${escapeHtml(drive.size)}<br>
+          <strong>Use%:</strong> ${escapeHtml(drive.use_pct)}
+        </div>
+      </div>
+      <div class="card-foot">
+        <div class="latency">${escapeHtml(drive.fstype)}<br>${escapeHtml(drive.device)}</div>
+        <button class="btn danger hidden" id="unmount-${escapeAttr(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
+      </div>
+    </article>
+  `).join("");
+
+  // Attach unmount button handlers
+  drives.forEach((drive) => {
+    const btn = document.getElementById(`unmount-${drive.device}`);
+    if (btn) {
+      btn.addEventListener("click", () => unmountDrive(drive.device, drive.mountpoint));
+    }
+  });
+}
+
+async function unmountDrive(device, mountpoint) {
+  if (!window.confirm(`Unmount ${device} (${mountpoint})?`)) return;
+  try {
+    const res = await fetch("/api/usb/unmount", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device, mountpoint }),
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Unmount failed");
+    }
+    await loadDashboard(true);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -273,6 +332,8 @@ async function loadDashboard(refresh = false) {
     applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
+    renderUsbDrives(data.server?.usb_drives || []);
+    updateUnmountButtons();
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");
     if (waiting) {
@@ -283,6 +344,25 @@ async function loadDashboard(refresh = false) {
     document.getElementById("server-status").textContent = "Offline";
     document.getElementById("server-dot").className = "dot offline";
   }
+}
+
+async function checkAdminSession() {
+  try {
+    const res = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.authenticated === true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function updateUnmountButtons() {
+  checkAdminSession().then((isAdmin) => {
+    document.querySelectorAll("button[id^='unmount-']").forEach((btn) => {
+      btn.classList.toggle("hidden", !isAdmin);
+    });
+  });
 }
 
 document.getElementById("refresh-btn").addEventListener("click", () => {

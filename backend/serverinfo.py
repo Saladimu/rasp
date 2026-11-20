@@ -512,6 +512,133 @@ def _read_meminfo_swap(path: str) -> tuple[int, int] | None:
         return None
 
 
+def _get_drive_label(device: str) -> str | None:
+    """Get the filesystem label for a block device."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["blkid", "-o", "value", "-s", "LABEL", device],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        label = result.stdout.strip()
+        return label if label else None
+    except Exception:
+        return None
+
+
+def _get_drive_firmware(device: str) -> str | None:
+    """Get the firmware/model info for a block device."""
+    # Use parent block device for sysfs
+    parent_device = _get_parent_block_device(device)
+    base_path = f"/sys/block/{parent_device}"
+    for attr in ("device/model", "device/vendor", "model"):
+        path = os.path.join(base_path, attr)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                value = handle.read().strip()
+                if value:
+                    return value
+        except OSError:
+            continue
+    # Fallback to lsblk with parent device
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["lsblk", "-no", "MODEL", f"/dev/{parent_device}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        model = result.stdout.strip()
+        return model if model else None
+    except Exception:
+        return None
+
+
+def _get_parent_block_device(device: str) -> str:
+    """Extract parent block device from partition device.
+    e.g., /dev/sda1 -> sda, /dev/nvme0n1p1 -> nvme0n1
+    """
+    import re
+    basename = os.path.basename(device)
+    # Remove trailing digits (partition number)
+    parent = re.sub(r'\d+$', '', basename)
+    return parent
+
+
+def _is_usb_drive(device: str) -> bool:
+    """Check if a block device is a USB drive."""
+    # Get parent block device (e.g., sda from sda1)
+    parent_device = _get_parent_block_device(device)
+    base_path = f"/sys/block/{parent_device}"
+    # Check if it's a removable device
+    removable_path = os.path.join(base_path, "removable")
+    try:
+        with open(removable_path, encoding="utf-8") as handle:
+            if handle.read().strip() == "1":
+                # Also check if it's USB
+                uevent_path = os.path.join(base_path, "device/uevent")
+                try:
+                    with open(uevent_path, encoding="utf-8") as handle:
+                        content = handle.read()
+                        if "USB" in content.upper():
+                            return True
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return False
+
+
+def collect_usb_drives() -> list[dict[str, Any]]:
+    """Collect information about mounted USB drives."""
+    usb_drives = []
+    try:
+        import psutil
+        partitions = psutil.disk_partitions(all=True)
+        for part in partitions:
+            device = part.device
+            mountpoint = part.mountpoint
+            fstype = part.fstype
+
+            # Skip non-USB devices
+            if not _is_usb_drive(device):
+                continue
+
+            # Get usage info
+            try:
+                usage = psutil.disk_usage(mountpoint)
+            except (OSError, PermissionError):
+                continue
+
+            label = _get_drive_label(device)
+            firmware = _get_drive_firmware(device)
+
+            used_gb = usage.used / (1024 ** 3)
+            total_gb = usage.total / (1024 ** 3)
+            use_pct = (usage.used / usage.total * 100) if usage.total > 0 else 0
+
+            usb_drives.append({
+                "device": device,
+                "mountpoint": mountpoint,
+                "fstype": fstype,
+                "label": label or "Unknown",
+                "firmware": firmware or "Unknown",
+                "used": format_bytes(usage.used),
+                "size": format_bytes(usage.total),
+                "use_pct": f"{use_pct:.1f}%",
+                "used_bytes": usage.used,
+                "total_bytes": usage.total,
+            })
+    except Exception:
+        pass
+    return usb_drives
+
+
 def collect_server_info() -> dict[str, Any]:
     now = time.monotonic()
     cached = _CACHE["data"]
@@ -600,6 +727,7 @@ def collect_server_info() -> dict[str, Any]:
         "status": "online",
         "dashboard_name": settings.dashboard_name,
         "dashboard_subtitle": settings.dashboard_subtitle,
+        "usb_drives": collect_usb_drives(),
     }
     _CACHE["data"] = result
     _CACHE["ts"] = now

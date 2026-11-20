@@ -27,7 +27,7 @@ from .database import db_session, init_db, row_to_dict
 from .alerts import process_alerts, public_alert_settings, save_alert_settings, send_test_alert
 from .health import cache_for, check_apps, close_http_client, empty_status
 from .history import delete_history, overall_uptime, summaries_for
-from .models import AlertSettingsPayload, AppPayload, HostPayload, LoginRequest, ReorderPayload, VisibilityPayload
+from .models import AlertSettingsPayload, AppPayload, HostPayload, LoginRequest, ReorderPayload, UnmountPayload, VisibilityPayload
 from .seed import bootstrap
 from .serverinfo import collect_server_info
 from .ssrf import (
@@ -412,6 +412,42 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict[s
 def logout(response: Response) -> dict[str, Any]:
     clear_session_cookies(response)
     return {"ok": True}
+
+
+@app.post("/api/usb/unmount")
+def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    """Unmount a USB drive. Requires admin authentication."""
+    import subprocess
+    try:
+        # Verify the mountpoint is actually mounted
+        result = subprocess.run(
+            ["findmnt", "-n", "-o", "TARGET", payload.mountpoint],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0 or payload.mountpoint not in result.stdout:
+            raise HTTPException(status_code=400, detail="Mountpoint not found or not mounted")
+
+        # Unmount the drive
+        result = subprocess.run(
+            ["umount", payload.mountpoint],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Unmount failed: {result.stderr.strip()}")
+
+        return {"ok": True, "message": f"Successfully unmounted {payload.device} from {payload.mountpoint}"}
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Unmount operation timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unmount failed: {exc}")
 
 
 @app.get("/api/admin/apps")

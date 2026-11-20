@@ -149,3 +149,13 @@ class AlertSettingsPayload(BaseModel):
         if value is None:
             return None
         return value.strip()
+
+
+class UnmountPayload(BaseModel):
+    device: str = Field(min_length=1, max_length=64)
+    mountpoint: str = Field(min_length=1, max_length=256)
+
+    @field_validator("device", "mountpoint")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        return value.strip()
