@@ -233,6 +233,34 @@ button, input, textarea, select {
   color: #bbf7d0;
 }
 
+html[data-theme="light"] .alert {
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+}
+
+html[data-theme="light"] .alert.success {
+  background: rgba(5, 150, 105, 0.12);
+  color: #065f46;
+}
+
+.run-output {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.table .run-command {
+  min-width: 200px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.table td .btn[data-run] {
+  white-space: nowrap;
+}
+
 .order-note {
   display: block;
   margin-top: 6px;

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import secrets
 from contextlib import asynccontextmanager
@@ -27,7 +28,16 @@ from .database import db_session, init_db, row_to_dict
 from .alerts import process_alerts, public_alert_settings, save_alert_settings, send_test_alert
 from .health import cache_for, check_apps, close_http_client, empty_status
 from .history import delete_history, overall_uptime, summaries_for
-from .models import AlertSettingsPayload, AppPayload, HostPayload, LoginRequest, ReorderPayload, UnmountPayload, VisibilityPayload
+from .models import (
+    AlertSettingsPayload,
+    AppPayload,
+    HostPayload,
+    LoginRequest,
+    ReorderPayload,
+    RunCommandPayload,
+    UnmountPayload,
+    VisibilityPayload,
+)
 from .seed import bootstrap
 from .serverinfo import collect_server_info
 from .ssrf import (
@@ -44,6 +54,10 @@ from .ssrf import (
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 ICON_DIR = DATA_DIR / "icons"
 SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+COMMAND_TIMEOUT_SECONDS = 60
+COMMAND_OUTPUT_LIMIT = 8000
+
+logger = logging.getLogger(__name__)
 
 
 def public_app(row: dict[str, Any]) -> dict[str, Any]:
@@ -438,6 +452,89 @@ def _host_run(args: list[str], timeout: int = 5):
     return last
 
 
+def _host_shell_prefix() -> list[str]:
+    import shutil
+    import subprocess
+
+    nsenter = shutil.which("nsenter")
+    if nsenter and Path("/proc/1/ns/mnt").exists():
+        for flags in (["-t", "1", "-m", "-u", "-i", "-n", "--"], ["-t", "1", "-m", "--"]):
+            try:
+                probe = subprocess.run(
+                    [nsenter, *flags, "true"],
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if probe.returncode == 0:
+                return [nsenter, *flags]
+    return []
+
+
+def _run_shell_command(command: str) -> dict[str, Any]:
+    import os
+    import signal
+    import subprocess
+    import threading
+
+    try:
+        process = subprocess.Popen(
+            [*_host_shell_prefix(), "/bin/sh", "-c", command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not run command: {exc}") from exc
+
+    captured = bytearray()
+    truncated = False
+
+    def drain() -> None:
+        nonlocal truncated
+        try:
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    return
+                if len(captured) >= COMMAND_OUTPUT_LIMIT:
+                    truncated = True
+                    continue
+                remaining = COMMAND_OUTPUT_LIMIT - len(captured)
+                captured.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    truncated = True
+        except (OSError, ValueError):
+            return
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        process.wait(timeout=COMMAND_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        raise HTTPException(
+            status_code=504,
+            detail=f"Command timed out after {COMMAND_TIMEOUT_SECONDS} seconds.",
+        ) from exc
+    reader.join(timeout=5)
+
+    output = captured.decode("utf-8", "replace").strip()
+    if truncated:
+        output = f"{output}\n… output truncated".strip()
+    return {
+        "ok": process.returncode == 0,
+        "returncode": process.returncode,
+        "output": output,
+    }
+
+
 def _clear_server_cache() -> None:
     from .serverinfo import _CACHE
 
@@ -592,6 +689,26 @@ def set_app_visibility(
     _: str = Depends(require_admin),
 ) -> dict[str, Any]:
     return {"app": set_visibility(app_id, "application", payload.visible)}
+
+
+@app.post("/api/admin/apps/{app_id}/run")
+async def run_app_command(
+    app_id: int,
+    payload: RunCommandPayload,
+    username: str = Depends(require_admin),
+) -> dict[str, Any]:
+    with db_session() as conn:
+        existing = conn.execute(
+            "SELECT id FROM apps WHERE id = ? AND kind = 'application'",
+            (app_id,),
+        ).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    logger.info("Admin %s ran command for app %s: %s", username, app_id, payload.command)
+    result = await asyncio.to_thread(_run_shell_command, payload.command)
+    cache_for("application").pop(app_id, None)
+    return result
 
 
 @app.post("/api/admin/websites")

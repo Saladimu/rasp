@@ -93,11 +93,14 @@ function updateOrderNote() {
 
 function renderTable(targetId, items, kind) {
   const body = document.getElementById(targetId);
+  const isApp = kind === "application";
   body.innerHTML = (items || []).map((entry) => `
     <tr class="${entry.visible ? "" : "is-hidden"}">
       <td><strong>${escapeHtml(entry.name)}</strong><br><span class="muted">${escapeHtml(entry.description || "")}</span></td>
       <td>${escapeHtml(entry.url)}</td>
       <td>${escapeHtml(entry.health_method)} ${escapeHtml(entry.health_url || "")}<br><span class="muted">${entry.monitoring_enabled ? "Monitoring on" : "Monitoring off"}</span></td>
+      ${isApp ? `<td><input class="run-command" data-run-input="${entry.id}" placeholder="e.g. docker restart filebrowser" autocomplete="off" spellcheck="false"></td>
+      <td><button class="btn" data-run="${entry.id}" type="button">RUN</button></td>` : ""}
       <td>
         <label class="visibility-toggle">
           <input type="checkbox" data-kind="${kind}" data-visible="${entry.id}" ${entry.visible ? "checked" : ""}>
@@ -110,7 +113,7 @@ function renderTable(targetId, items, kind) {
         <button class="btn danger" data-kind="${kind}" data-delete="${entry.id}">Delete</button>
       </td>
     </tr>
-  `).join("") || `<tr><td colspan="6" class="muted">No ${kind === "website" ? "websites" : "applications"} yet.</td></tr>`;
+  `).join("") || `<tr><td colspan="${isApp ? 8 : 6}" class="muted">No ${kind === "website" ? "websites" : "applications"} yet.</td></tr>`;
 }
 
 async function loadAdminLists() {
@@ -122,6 +125,8 @@ async function loadAdminLists() {
   lastWebsites = sitesData.websites || [];
   renderTable("app-table", lastApps, "application");
   renderTable("website-table", lastWebsites, "website");
+  setAlert("run-error", "");
+  setAlert("run-ok", "");
 }
 
 function escapeHtml(value) {
@@ -229,7 +234,49 @@ document.getElementById("add-website-btn").addEventListener("click", () => openM
 document.getElementById("cancel-btn").addEventListener("click", closeModal);
 document.querySelector("input[name='display_order']").addEventListener("input", updateOrderNote);
 
+async function runCommand(appId, input) {
+  const command = (input?.value || "").trim();
+  setAlert("run-error", "");
+  setAlert("run-ok", "");
+  if (!command) {
+    setAlert("run-error", "Enter a command to run.");
+    if (input) input.focus();
+    return;
+  }
+  if (!window.confirm(`Run this command on the server?\n\n${command}`)) return;
+  const button = document.querySelector(`button[data-run="${appId}"]`);
+  const original = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "RUNNING…";
+  }
+  try {
+    const data = await api(`/api/admin/apps/${appId}/run`, {
+      method: "POST",
+      body: JSON.stringify({ command })
+    });
+    const output = (data.output || "").trim();
+    if (data.ok) {
+      setAlert("run-ok", output || "Command finished successfully.");
+    } else {
+      setAlert("run-error", output || `Command failed with exit code ${data.returncode}.`);
+    }
+  } catch (err) {
+    setAlert("run-error", err.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+}
+
 async function handleTableClick(event) {
+  const runId = event.target.getAttribute("data-run");
+  if (runId) {
+    await runCommand(runId, document.querySelector(`[data-run-input="${runId}"]`));
+    return;
+  }
   const kind = event.target.getAttribute("data-kind");
   const editId = event.target.getAttribute("data-edit");
   const deleteId = event.target.getAttribute("data-delete");
@@ -260,6 +307,14 @@ async function handleTableClick(event) {
 
 document.getElementById("app-table").addEventListener("click", handleTableClick);
 document.getElementById("website-table").addEventListener("click", handleTableClick);
+
+document.getElementById("app-table").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const input = event.target.closest("[data-run-input]");
+  if (!input) return;
+  event.preventDefault();
+  runCommand(input.getAttribute("data-run-input"), input);
+});
 
 document.getElementById("icon-file").addEventListener("change", async (event) => {
   const file = event.target.files[0];

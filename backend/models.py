@@ -102,6 +102,15 @@ class AppPayload(BaseModel):
         return kind
 
 
+class RunCommandPayload(BaseModel):
+    command: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("command", mode="before")
+    @classmethod
+    def strip_command(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+
 class ReorderPayload(BaseModel):
     ids: list[int]
 

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <meta name="theme-color" content="#0b1220">
   <link rel="manifest" href="/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
   <div class="shell">
@@ -54,12 +54,16 @@
             <button class="btn" id="add-btn" type="button">Add Application</button>
           </div>
           <div class="admin-section-body">
+            <div class="alert" id="run-error"></div>
+            <div class="alert success run-output" id="run-ok"></div>
             <table class="table">
               <thead>
                 <tr>
                   <th>App</th>
                   <th>URL</th>
                   <th>Health</th>
+                  <th>Run command</th>
+                  <th></th>
                   <th>Visible</th>
                   <th>Order</th>
                   <th></th>
@@ -263,6 +267,6 @@
       </form>
     </div>
   </div>
-  <script src="/static/admin.js?v=10"></script>
+  <script src="/static/admin.js?v=11"></script>
 </body>
 </html>
