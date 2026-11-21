@@ -12,6 +12,9 @@
   --offline: #f87171;
   --unknown: #94a3b8;
   --danger: #fb7185;
+  --warning: #fbbf24;
+  --warning-bg: linear-gradient(160deg, rgba(250, 204, 21, 0.18), rgba(251, 146, 60, 0.1));
+  --warning-line: rgba(250, 204, 21, 0.5);
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
   --radius: 22px;
   --surface: rgba(11, 18, 32, 0.72);
@@ -35,6 +38,9 @@ html[data-theme="light"] {
   --offline: #dc2626;
   --unknown: #64748b;
   --danger: #e11d48;
+  --warning: #b45309;
+  --warning-bg: linear-gradient(160deg, rgba(245, 158, 11, 0.24), rgba(251, 146, 60, 0.14));
+  --warning-line: rgba(217, 119, 6, 0.45);
   --shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
   --surface: rgba(255, 255, 255, 0.82);
   --surface-strong: #ffffff;
@@ -555,6 +561,21 @@ html[data-theme="light"] .stat.temp-unknown {
 .usb-empty p,
 .usb-empty .latency {
   color: var(--muted);
+}
+
+.usb-unmounted {
+  background-image: var(--warning-bg);
+  border-color: var(--warning-line);
+  opacity: 1;
+}
+
+.usb-unmounted:hover {
+  border-color: var(--warning-line);
+}
+
+.usb-unmounted .dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.16);
 }
 
 .confirm-modal {

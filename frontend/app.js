@@ -251,7 +251,7 @@ function usbButtonId(device) {
 
 function emptyUsbCard() {
   return `
-    <article class="card card-unknown usb-card usb-empty">
+    <article class="card card-unknown usb-card usb-empty usb-unmounted">
       <div class="card-head usb-head">
         <div class="icon-wrap">${iconMarkup("usb")}</div>
         <h2>USB Drive</h2>
