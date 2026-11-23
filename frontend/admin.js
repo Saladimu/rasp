@@ -1,6 +1,7 @@
 let csrfToken = "";
 let lastApps = [];
 let lastWebsites = [];
+let lastRunCommands = [];
 
 function show(el, on) {
   el.classList.toggle("hidden", !on);
@@ -94,13 +95,22 @@ function updateOrderNote() {
 function renderTable(targetId, items, kind) {
   const body = document.getElementById(targetId);
   const isApp = kind === "application";
+  const hasCommands = lastRunCommands.length > 0;
+  const commandOptions = lastRunCommands
+    .map((command) => `<option value="${command.id}">${escapeHtml(command.name)}</option>`)
+    .join("");
   body.innerHTML = (items || []).map((entry) => `
     <tr class="${entry.visible ? "" : "is-hidden"}">
       <td><strong>${escapeHtml(entry.name)}</strong><br><span class="muted">${escapeHtml(entry.description || "")}</span></td>
       <td>${escapeHtml(entry.url)}</td>
       <td>${escapeHtml(entry.health_method)} ${escapeHtml(entry.health_url || "")}<br><span class="muted">${entry.monitoring_enabled ? "Monitoring on" : "Monitoring off"}</span></td>
-      ${isApp ? `<td><input class="run-command" data-run-input="${entry.id}" placeholder="e.g. docker restart filebrowser" autocomplete="off" spellcheck="false"></td>
-      <td><button class="btn" data-run="${entry.id}" type="button">RUN</button></td>` : ""}
+      ${isApp ? `<td>
+        <select class="run-command" data-run-select="${entry.id}" ${hasCommands ? "" : "disabled"}>
+          <option value="">${hasCommands ? "Select command…" : "No saved commands"}</option>
+          ${commandOptions}
+        </select>
+      </td>
+      <td><button class="btn" data-run="${entry.id}" type="button" ${hasCommands ? "" : "disabled"}>RUN</button></td>` : ""}
       <td>
         <label class="visibility-toggle">
           <input type="checkbox" data-kind="${kind}" data-visible="${entry.id}" ${entry.visible ? "checked" : ""}>
@@ -117,16 +127,33 @@ function renderTable(targetId, items, kind) {
 }
 
 async function loadAdminLists() {
-  const [appsData, sitesData] = await Promise.all([
+  const [appsData, sitesData, commandsData] = await Promise.all([
     api("/api/admin/apps"),
-    api("/api/admin/websites")
+    api("/api/admin/websites"),
+    api("/api/admin/run-commands")
   ]);
   lastApps = appsData.apps || [];
   lastWebsites = sitesData.websites || [];
+  lastRunCommands = commandsData.commands || [];
   renderTable("app-table", lastApps, "application");
   renderTable("website-table", lastWebsites, "website");
+  renderRunCommands();
   setAlert("run-error", "");
   setAlert("run-ok", "");
+}
+
+function renderRunCommands() {
+  const body = document.getElementById("run-command-table");
+  body.innerHTML = lastRunCommands.map((command) => `
+    <tr>
+      <td><strong>${escapeHtml(command.name)}</strong></td>
+      <td class="command-text">${escapeHtml(command.command)}</td>
+      <td class="actions">
+        <button class="btn secondary" data-edit-command="${command.id}" type="button">Edit</button>
+        <button class="btn danger" data-delete-command="${command.id}" type="button">Delete</button>
+      </td>
+    </tr>
+  `).join("") || `<tr><td colspan="3" class="muted">No saved commands yet.</td></tr>`;
 }
 
 function escapeHtml(value) {
@@ -234,16 +261,17 @@ document.getElementById("add-website-btn").addEventListener("click", () => openM
 document.getElementById("cancel-btn").addEventListener("click", closeModal);
 document.querySelector("input[name='display_order']").addEventListener("input", updateOrderNote);
 
-async function runCommand(appId, input) {
-  const command = (input?.value || "").trim();
+async function runCommand(appId, select) {
+  const commandId = Number(select?.value || 0);
+  const command = lastRunCommands.find((item) => Number(item.id) === commandId);
   setAlert("run-error", "");
   setAlert("run-ok", "");
   if (!command) {
-    setAlert("run-error", "Enter a command to run.");
-    if (input) input.focus();
+    setAlert("run-error", "Select a command to run.");
+    if (select) select.focus();
     return;
   }
-  if (!window.confirm(`Run this command on the server?\n\n${command}`)) return;
+  if (!window.confirm(`Run "${command.name}" on the server?\n\n${command.command}`)) return;
   const button = document.querySelector(`button[data-run="${appId}"]`);
   const original = button ? button.textContent : "";
   if (button) {
@@ -253,7 +281,7 @@ async function runCommand(appId, input) {
   try {
     const data = await api(`/api/admin/apps/${appId}/run`, {
       method: "POST",
-      body: JSON.stringify({ command })
+      body: JSON.stringify({ command_id: command.id })
     });
     const output = (data.output || "").trim();
     if (data.ok) {
@@ -274,7 +302,7 @@ async function runCommand(appId, input) {
 async function handleTableClick(event) {
   const runId = event.target.getAttribute("data-run");
   if (runId) {
-    await runCommand(runId, document.querySelector(`[data-run-input="${runId}"]`));
+    await runCommand(runId, document.querySelector(`[data-run-select="${runId}"]`));
     return;
   }
   const kind = event.target.getAttribute("data-kind");
@@ -310,10 +338,10 @@ document.getElementById("website-table").addEventListener("click", handleTableCl
 
 document.getElementById("app-table").addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
-  const input = event.target.closest("[data-run-input]");
-  if (!input) return;
+  const select = event.target.closest("[data-run-select]");
+  if (!select) return;
   event.preventDefault();
-  runCommand(input.getAttribute("data-run-input"), input);
+  runCommand(select.getAttribute("data-run-select"), select);
 });
 
 document.getElementById("icon-file").addEventListener("change", async (event) => {
@@ -480,6 +508,75 @@ document.getElementById("host-table").addEventListener("click", async (event) =>
     setAlert("host-ok", "Host deleted.");
   } catch (err) {
     setAlert("host-error", err.message);
+  }
+});
+
+function resetRunCommandForm() {
+  const form = document.getElementById("run-command-form");
+  form.id.value = "";
+  form.name.value = "";
+  form.command.value = "";
+  document.getElementById("run-command-submit").textContent = "Add Command";
+  document.getElementById("run-command-cancel").classList.add("hidden");
+}
+
+function editRunCommand(command) {
+  const form = document.getElementById("run-command-form");
+  form.id.value = command.id;
+  form.name.value = command.name;
+  form.command.value = command.command;
+  document.getElementById("run-command-submit").textContent = "Save Command";
+  document.getElementById("run-command-cancel").classList.remove("hidden");
+  setAlert("run-command-error", "");
+  setAlert("run-command-ok", "");
+  form.name.focus();
+}
+
+document.getElementById("run-command-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const editing = Boolean(form.id.value);
+  try {
+    await api(editing ? `/api/admin/run-commands/${form.id.value}` : "/api/admin/run-commands", {
+      method: editing ? "PUT" : "POST",
+      body: JSON.stringify({ name: form.name.value, command: form.command.value })
+    });
+    resetRunCommandForm();
+    await loadAdminLists();
+    setAlert("run-command-error", "");
+    setAlert("run-command-ok", editing ? "Command updated." : "Command added.");
+  } catch (err) {
+    setAlert("run-command-error", err.message);
+    setAlert("run-command-ok", "");
+  }
+});
+
+document.getElementById("run-command-cancel").addEventListener("click", () => {
+  resetRunCommandForm();
+  setAlert("run-command-error", "");
+  setAlert("run-command-ok", "");
+});
+
+document.getElementById("run-command-table").addEventListener("click", async (event) => {
+  const editId = event.target.getAttribute("data-edit-command");
+  if (editId) {
+    const command = lastRunCommands.find((item) => String(item.id) === editId);
+    if (command) editRunCommand(command);
+    return;
+  }
+  const deleteId = event.target.getAttribute("data-delete-command");
+  if (!deleteId) return;
+  const command = lastRunCommands.find((item) => String(item.id) === deleteId);
+  if (!window.confirm(`Delete command "${command ? command.name : ""}"?`)) return;
+  try {
+    await api(`/api/admin/run-commands/${deleteId}`, { method: "DELETE" });
+    if (document.getElementById("run-command-form").id.value === deleteId) resetRunCommandForm();
+    await loadAdminLists();
+    setAlert("run-command-error", "");
+    setAlert("run-command-ok", "Command deleted.");
+  } catch (err) {
+    setAlert("run-command-error", err.message);
+    setAlert("run-command-ok", "");
   }
 });
 

@@ -134,6 +134,10 @@ Admin (session cookie required):
 - `PUT /api/admin/apps/{id}`
 - `PUT /api/admin/apps/{id}/visibility`
 - `POST /api/admin/apps/{id}/run`
+- `GET /api/admin/run-commands`
+- `POST /api/admin/run-commands`
+- `PUT /api/admin/run-commands/{id}`
+- `DELETE /api/admin/run-commands/{id}`
 - `DELETE /api/admin/apps/{id}`
 - `GET /api/admin/websites`
 - `POST /api/admin/websites`
@@ -201,7 +205,7 @@ The `./data` directory is mounted as a volume, so applications and the admin acc
 - Set `TRUST_PROXY=true` only behind a trusted reverse proxy.
 - Keep `ALLOWED_HEALTHCHECK_HOSTS` as small as possible.
 - Review health-check URLs before saving them. The backend rejects targets outside the allowlist.
-- The Applications panel can run commands on the host as the dashboard user. Keep admin credentials private and do not expose the dashboard publicly without a trusted access layer.
+- The Applications panel runs commands saved in Admin > Parameter Run Command as the dashboard user. Commands that start with `sudo` are rejected. Keep admin credentials private and do not expose the dashboard publicly without a trusted access layer.
 - Rotate the admin password with `RESET_ADMIN_PASSWORD=true`, restart once, then set it back to `false`.
 
 ## Environment variables

@@ -2,6 +2,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from .command_safety import CommandNotAllowed, ensure_command_allowed
+
 ALLOWED_ICONS = {
     "folder",
     "brain",
@@ -103,12 +105,25 @@ class AppPayload(BaseModel):
 
 
 class RunCommandPayload(BaseModel):
+    command_id: int = Field(ge=1)
+
+
+class RunCommandEntryPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
     command: str = Field(min_length=1, max_length=1000)
 
-    @field_validator("command", mode="before")
+    @field_validator("name", "command", mode="before")
     @classmethod
-    def strip_command(cls, value: str) -> str:
+    def strip_text(cls, value: str) -> str:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: str) -> str:
+        try:
+            return ensure_command_allowed(value)
+        except CommandNotAllowed as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class ReorderPayload(BaseModel):

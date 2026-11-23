@@ -87,6 +87,14 @@ def init_db() -> None:
                 FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS run_commands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                command TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time
                 ON login_attempts(ip, attempted_at);
             CREATE INDEX IF NOT EXISTS idx_health_history_app_time

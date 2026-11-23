@@ -263,8 +263,20 @@ html[data-theme="light"] .alert.success {
   font-size: 0.82rem;
 }
 
+.table .command-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
 .table td .btn[data-run] {
   white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .order-note {

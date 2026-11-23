@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import secrets
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from .auth import (
 from .config import DATA_DIR, settings
 from .database import db_session, init_db, row_to_dict
 from .alerts import process_alerts, public_alert_settings, save_alert_settings, send_test_alert
+from .command_safety import CommandNotAllowed, ensure_command_allowed
 from .health import cache_for, check_apps, close_http_client, empty_status
 from .history import delete_history, overall_uptime, summaries_for
 from .models import (
@@ -34,6 +36,7 @@ from .models import (
     HostPayload,
     LoginRequest,
     ReorderPayload,
+    RunCommandEntryPayload,
     RunCommandPayload,
     UnmountPayload,
     VisibilityPayload,
@@ -225,6 +228,60 @@ def delete_entry(app_id: int, kind: str) -> None:
         conn.execute("DELETE FROM apps WHERE id = ?", (app_id,))
     cache_for(kind).pop(app_id, None)
     delete_history(app_id)
+
+
+def fetch_run_commands() -> list[dict[str, Any]]:
+    with db_session() as conn:
+        rows = conn.execute(
+            "SELECT * FROM run_commands ORDER BY name COLLATE NOCASE ASC, id ASC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def insert_run_command(payload: RunCommandEntryPayload) -> dict[str, Any]:
+    try:
+        with db_session() as conn:
+            cursor = conn.execute(
+                "INSERT INTO run_commands (name, command) VALUES (?, ?)",
+                (payload.name, payload.command),
+            )
+            row = conn.execute(
+                "SELECT * FROM run_commands WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail="A command with this name already exists.") from exc
+    return dict(row)
+
+
+def update_run_command(command_id: int, payload: RunCommandEntryPayload) -> dict[str, Any]:
+    try:
+        with db_session() as conn:
+            existing = conn.execute(
+                "SELECT id FROM run_commands WHERE id = ?", (command_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Run command not found.")
+            conn.execute(
+                """
+                UPDATE run_commands
+                SET name = ?, command = ?, updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (payload.name, payload.command, command_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM run_commands WHERE id = ?", (command_id,)
+            ).fetchone()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail="A command with this name already exists.") from exc
+    return dict(row)
+
+
+def delete_run_command(command_id: int) -> None:
+    with db_session() as conn:
+        cursor = conn.execute("DELETE FROM run_commands WHERE id = ?", (command_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Run command not found.")
 
 
 @asynccontextmanager
@@ -691,6 +748,34 @@ def set_app_visibility(
     return {"app": set_visibility(app_id, "application", payload.visible)}
 
 
+@app.get("/api/admin/run-commands")
+def admin_list_run_commands(_: str = Depends(require_admin)) -> dict[str, Any]:
+    return {"commands": fetch_run_commands()}
+
+
+@app.post("/api/admin/run-commands")
+def create_run_command(
+    payload: RunCommandEntryPayload,
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return {"command": insert_run_command(payload)}
+
+
+@app.put("/api/admin/run-commands/{command_id}")
+def edit_run_command(
+    command_id: int,
+    payload: RunCommandEntryPayload,
+    _: str = Depends(require_admin),
+) -> dict[str, Any]:
+    return {"command": update_run_command(command_id, payload)}
+
+
+@app.delete("/api/admin/run-commands/{command_id}")
+def remove_run_command(command_id: int, _: str = Depends(require_admin)) -> dict[str, Any]:
+    delete_run_command(command_id)
+    return {"ok": True}
+
+
 @app.post("/api/admin/apps/{app_id}/run")
 async def run_app_command(
     app_id: int,
@@ -702,11 +787,27 @@ async def run_app_command(
             "SELECT id FROM apps WHERE id = ? AND kind = 'application'",
             (app_id,),
         ).fetchone()
+        command_row = conn.execute(
+            "SELECT id, name, command FROM run_commands WHERE id = ?",
+            (payload.command_id,),
+        ).fetchone()
     if not existing:
         raise HTTPException(status_code=404, detail="Application not found.")
+    if not command_row:
+        raise HTTPException(status_code=404, detail="Run command not found.")
+    try:
+        command = ensure_command_allowed(command_row["command"])
+    except CommandNotAllowed as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    logger.info("Admin %s ran command for app %s: %s", username, app_id, payload.command)
-    result = await asyncio.to_thread(_run_shell_command, payload.command)
+    logger.info(
+        "Admin %s ran command %s (%s) for app %s",
+        username,
+        command_row["id"],
+        command_row["name"],
+        app_id,
+    )
+    result = await asyncio.to_thread(_run_shell_command, command)
     cache_for("application").pop(app_id, None)
     return result
 
