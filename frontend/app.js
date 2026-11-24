@@ -249,7 +249,31 @@ function usbButtonId(device) {
   return `unmount-${String(device || "").replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
-function emptyUsbCard() {
+const USB_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const GMT7_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function formatUsbActivity(iso) {
+  if (!iso) return "";
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(iso);
+  const date = new Date(hasZone ? iso : `${iso}Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  const shifted = new Date(date.getTime() + GMT7_OFFSET_MS);
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  const month = USB_MONTHS[shifted.getUTCMonth()];
+  const hours = String(shifted.getUTCHours()).padStart(2, "0");
+  const minutes = String(shifted.getUTCMinutes()).padStart(2, "0");
+  return `${day}-${month} ${hours}:${minutes}`;
+}
+
+function usbActivityLine(lastActivity, folder) {
+  const stamp = formatUsbActivity(lastActivity) || "—";
+  return `<p class="usb-activity">
+        <span class="usb-folder">${escapeHtml(folder || "/mnt/usb")}</span>
+        <span class="usb-activity-time">last activity: ${escapeHtml(stamp)}</span>
+      </p>`;
+}
+
+function emptyUsbCard(lastActivity) {
   return `
     <article class="card card-unknown usb-card usb-empty usb-unmounted">
       <div class="card-head usb-head">
@@ -257,7 +281,7 @@ function emptyUsbCard() {
         <h2>USB Drive</h2>
         <div class="status"><span class="dot unknown"></span>Unmounted</div>
       </div>
-      <p>No USB drive mounted</p>
+      ${usbActivityLine(lastActivity, "/mnt/usb")}
       <div class="usb-meta">
         <span>Label: —</span>
         <span>Firmware: —</span>
@@ -273,13 +297,13 @@ function emptyUsbCard() {
   `;
 }
 
-function renderUsbDrives(drives) {
+function renderUsbDrives(drives, lastActivity) {
   const grid = document.getElementById("usb-grid");
   const toolbar = document.getElementById("usb-toolbar");
   if (!grid) return;
   if (toolbar) toolbar.style.display = "";
   if (!drives || drives.length === 0) {
-    grid.innerHTML = emptyUsbCard();
+    grid.innerHTML = emptyUsbCard(lastActivity);
     return;
   }
   grid.innerHTML = drives.map((drive) => `
@@ -289,7 +313,7 @@ function renderUsbDrives(drives) {
         <h2>USB Drive</h2>
         <div class="status"><span class="dot online"></span>Mounted</div>
       </div>
-      <p>${escapeHtml(drive.mountpoint)}</p>
+      ${usbActivityLine(lastActivity, drive.mountpoint)}
       <div class="usb-meta">
         <span>Label: ${escapeHtml(drive.label)}</span>
         <span>Firmware: ${escapeHtml(drive.firmware)}</span>
@@ -438,7 +462,7 @@ async function unmountDrive(device, mountpoint) {
   if (!res.ok) {
     throw new Error(errorDetail(data.detail, "Unmount failed"));
   }
-  renderUsbDrives([]);
+  renderUsbDrives([], data.last_activity || "");
   await loadDashboard(true);
 }
 
@@ -485,7 +509,7 @@ async function loadDashboard(refresh = false) {
     applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
-    renderUsbDrives(data.server?.usb_drives || []);
+    renderUsbDrives(data.server?.usb_drives || [], data.server?.usb_last_activity || "");
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");
     if (waiting) {

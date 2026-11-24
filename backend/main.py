@@ -625,11 +625,16 @@ def unmount_usb(payload: UnmountPayload, _: str = Depends(require_admin)) -> dic
         still = _host_run(["findmnt", "-n", "-o", "TARGET", "--target", mountpoint], timeout=5)
         if still and still.returncode == 0 and mountpoint in (still.stdout or ""):
             raise HTTPException(status_code=500, detail="Drive is still mounted")
-        from .serverinfo import hide_usb_mount
+        from .serverinfo import hide_usb_mount, record_usb_activity
 
         hide_usb_mount(mountpoint)
         _clear_server_cache()
-        return {"ok": True, "message": f"Successfully unmounted {device} from {mountpoint}"}
+        last_activity = record_usb_activity()
+        return {
+            "ok": True,
+            "message": f"Successfully unmounted {device} from {mountpoint}",
+            "last_activity": last_activity,
+        }
     except HTTPException:
         raise
     except subprocess.TimeoutExpired:
@@ -658,12 +663,17 @@ def mount_usb(_: str = Depends(require_admin)) -> dict[str, Any]:
 
     mountpoint = USB_MOUNTPOINT
     try:
-        from .serverinfo import unhide_usb_mount
+        from .serverinfo import record_usb_activity, unhide_usb_mount
 
         if _mountpoint_busy(mountpoint):
             unhide_usb_mount(mountpoint)
             _clear_server_cache()
-            return {"ok": True, "message": f"Already mounted at {mountpoint}"}
+            last_activity = record_usb_activity()
+            return {
+                "ok": True,
+                "message": f"Already mounted at {mountpoint}",
+                "last_activity": last_activity,
+            }
         prepared = _host_run(["mkdir", "-p", mountpoint], timeout=5)
         if prepared is None or prepared.returncode != 0:
             detail = (_host_output(prepared) or "Could not create mountpoint").strip()
@@ -676,7 +686,12 @@ def mount_usb(_: str = Depends(require_admin)) -> dict[str, Any]:
             raise HTTPException(status_code=500, detail="Mount did not attach a filesystem")
         unhide_usb_mount(mountpoint)
         _clear_server_cache()
-        return {"ok": True, "message": f"Successfully mounted {mountpoint}"}
+        last_activity = record_usb_activity()
+        return {
+            "ok": True,
+            "message": f"Successfully mounted {mountpoint}",
+            "last_activity": last_activity,
+        }
     except HTTPException:
         raise
     except subprocess.TimeoutExpired:

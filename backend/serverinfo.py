@@ -4,6 +4,7 @@ import shutil
 import socket
 import subprocess
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
@@ -869,6 +870,35 @@ def unhide_usb_mount(mountpoint: str) -> None:
         _HIDDEN_MOUNTS.pop(mountpoint, None)
 
 
+_USB_ACTIVITY_KEY = "usb_last_activity"
+
+
+def record_usb_activity() -> str:
+    from .database import db_session
+
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db_session() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (_USB_ACTIVITY_KEY, stamp),
+        )
+    return stamp
+
+
+def get_usb_last_activity() -> str:
+    from .database import db_session
+
+    try:
+        with db_session() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (_USB_ACTIVITY_KEY,)
+            ).fetchone()
+    except Exception:
+        return ""
+    return (row["value"] if row else "") or ""
+
+
 def _is_hidden_mount(mountpoint: str) -> bool:
     hidden_at = _HIDDEN_MOUNTS.get(mountpoint)
     if hidden_at is None:
@@ -1063,6 +1093,7 @@ def collect_server_info() -> dict[str, Any]:
         "dashboard_name": settings.dashboard_name,
         "dashboard_subtitle": settings.dashboard_subtitle,
         "usb_drives": collect_usb_drives(),
+        "usb_last_activity": get_usb_last_activity(),
     }
     _CACHE["data"] = result
     _CACHE["ts"] = now

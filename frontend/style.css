@@ -542,6 +542,29 @@ html[data-theme="light"] .stat.temp-unknown {
   flex: 0 0 auto;
 }
 
+.usb-activity {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.usb-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usb-activity-time {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .usb-meta {
   display: grid;
   gap: 4px;
