@@ -33,6 +33,7 @@ from .history import delete_history, overall_uptime, summaries_for
 from .models import (
     AlertSettingsPayload,
     AppPayload,
+    BluetoothPowerPayload,
     HostPayload,
     LoginRequest,
     ReorderPayload,
@@ -698,6 +699,21 @@ def mount_usb(_: str = Depends(require_admin)) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Mount operation timed out")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Mount failed: {exc}")
+
+
+@app.post("/api/bluetooth/power")
+def set_bluetooth_power_endpoint(payload: BluetoothPowerPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    from .serverinfo import set_bluetooth_power
+
+    ok, message = set_bluetooth_power(payload.enabled)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    _clear_server_cache()
+    return {
+        "ok": True,
+        "enabled": payload.enabled,
+        "message": message or f"Bluetooth turned {'on' if payload.enabled else 'off'}",
+    }
 
 
 @app.get("/api/admin/apps")

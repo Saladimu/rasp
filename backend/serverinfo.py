@@ -594,6 +594,132 @@ def _host_stdout(args: list[str], timeout: int = 3) -> str | None:
             return text
     return None
 
+_BT_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_BT_CACHE_TTL = 5.0
+_BT_UNAVAILABLE_MESSAGE = "Bluetooth is not available on this host."
+
+
+def _host_command_result(args: list[str], timeout: int = 8):
+    nsenter = shutil.which("nsenter")
+    commands: list[list[str]] = []
+    if nsenter and os.path.exists("/proc/1/ns/mnt"):
+        commands.append([nsenter, "-t", "1", "-m", "--", *args])
+    commands.append(args)
+    last = None
+    for command in commands:
+        try:
+            last = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            last = None
+            continue
+        if last.returncode == 0:
+            return last
+    return last
+
+
+def _parse_bluetooth_show(text: str) -> dict[str, Any]:
+    adapter = ""
+    name = ""
+    powered = False
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        match = re.match(r"Controller\s+([0-9A-Fa-f:]{17})\s*(.*)", stripped)
+        if match:
+            adapter = match.group(1)
+            rest = match.group(2).strip()
+            if rest and not rest.startswith("("):
+                name = rest
+            continue
+        lower = stripped.lower()
+        if lower.startswith("powered:"):
+            powered = stripped.split(":", 1)[1].strip().lower() == "yes"
+        elif lower.startswith("powerstate:"):
+            powered = stripped.split(":", 1)[1].strip().lower() == "on"
+        elif lower.startswith("alias:") and not name:
+            name = stripped.split(":", 1)[1].strip()
+    return {"adapter": adapter, "name": name, "powered": powered}
+
+
+def _parse_bluetooth_devices(text: str) -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line in (text or "").splitlines():
+        match = re.match(r"Device\s+([0-9A-Fa-f:]{17})\s*(.*)", line.strip())
+        if not match:
+            continue
+        mac = match.group(1).upper()
+        if mac in seen:
+            continue
+        seen.add(mac)
+        devices.append({"mac": mac, "name": match.group(2).strip() or mac})
+    return devices
+
+
+def _collect_connected_bluetooth_devices() -> list[dict[str, Any]]:
+    devices = _parse_bluetooth_devices(_host_command(["bluetoothctl", "devices", "Connected"]) or "")
+    if devices:
+        return devices
+    for device in _parse_bluetooth_devices(_host_command(["bluetoothctl", "devices"]) or "")[:8]:
+        info = _host_command(["bluetoothctl", "info", device["mac"]]) or ""
+        if re.search(r"^\s*Connected:\s*yes\s*$", info, re.IGNORECASE | re.MULTILINE):
+            devices.append(device)
+    return devices
+
+
+def collect_bluetooth() -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _BT_CACHE["data"]
+    if cached and now - _BT_CACHE["ts"] < _BT_CACHE_TTL:
+        return dict(cached)
+
+    info: dict[str, Any] = {
+        "available": False,
+        "powered": False,
+        "adapter": "",
+        "name": "",
+        "devices": [],
+        "message": _BT_UNAVAILABLE_MESSAGE,
+    }
+    show = _host_command(["bluetoothctl", "show"]) or _host_command(["bluetoothctl", "list"])
+    if show:
+        parsed = _parse_bluetooth_show(show)
+        info.update(parsed)
+        info["available"] = bool(parsed["adapter"])
+        if info["available"]:
+            info["message"] = ""
+            if parsed["powered"]:
+                info["devices"] = _collect_connected_bluetooth_devices()
+        else:
+            info["message"] = "No Bluetooth adapter found."
+    _BT_CACHE["data"] = info
+    _BT_CACHE["ts"] = now
+    return dict(info)
+
+
+def set_bluetooth_power(enabled: bool) -> tuple[bool, str]:
+    result = _host_command_result(
+        ["bluetoothctl", "power", "on" if enabled else "off"], timeout=10
+    )
+    _BT_CACHE["data"] = None
+    _BT_CACHE["ts"] = 0.0
+    if result is None:
+        return False, _BT_UNAVAILABLE_MESSAGE
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+    if result.returncode != 0:
+        return False, output or "Bluetooth power change failed."
+    state = collect_bluetooth()
+    if not state["available"]:
+        return False, state["message"] or _BT_UNAVAILABLE_MESSAGE
+    if bool(state["powered"]) != enabled:
+        return False, output or "Bluetooth power change was not applied."
+    return True, output or f"Bluetooth turned {'on' if enabled else 'off'}."
+
 
 def _get_parent_block_device(device: str) -> str:
     basename = os.path.basename(device or "")
@@ -1007,6 +1133,7 @@ def collect_server_info() -> dict[str, Any]:
     if cached and now - _CACHE["ts"] < _CACHE_TTL:
         fresh = dict(cached)
         fresh["usb_drives"] = collect_usb_drives()
+        fresh["bluetooth"] = collect_bluetooth()
         _CACHE["data"] = fresh
         return fresh
 
@@ -1094,6 +1221,7 @@ def collect_server_info() -> dict[str, Any]:
         "dashboard_subtitle": settings.dashboard_subtitle,
         "usb_drives": collect_usb_drives(),
         "usb_last_activity": get_usb_last_activity(),
+        "bluetooth": collect_bluetooth(),
     }
     _CACHE["data"] = result
     _CACHE["ts"] = now

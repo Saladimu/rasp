@@ -183,3 +183,7 @@ class UnmountPayload(BaseModel):
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
+
+
+class BluetoothPowerPayload(BaseModel):
+    enabled: bool

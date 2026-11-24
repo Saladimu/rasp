@@ -18,6 +18,7 @@ const ICONS = {
   cpu: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
   "hard-drive": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h12l4 8H2zM2 12h20v8H2z"/><path d="M6 16h.01M10 16h.01"/></svg>',
   usb: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"/><path d="M4 9h16"/><path d="M6 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/></svg>',
+  bluetooth: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 7 10 10-5 4V3l5 4L7 17"/></svg>',
   wifi: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5a11 11 0 0 1 14 0M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="20" r="1"/></svg>',
   lock: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   user: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>',
@@ -297,13 +298,69 @@ function emptyUsbCard(lastActivity) {
   `;
 }
 
+let bluetoothState = null;
+
+function bluetoothCardHtml() {
+  const info = bluetoothState || {};
+  const available = Boolean(info.available);
+  const powered = Boolean(info.powered);
+  const devices = Array.isArray(info.devices) ? info.devices : [];
+  const statusLabel = !available ? "Unavailable" : powered ? "On" : "Off";
+  const dotClass = !available ? "unknown" : powered ? "online" : "offline";
+  const themeClass = !available ? "bt-unavailable" : powered ? "bt-on" : "bt-off";
+  const cardClass = !available ? "card-unknown" : powered ? "card-online" : "card-offline";
+  const adapter = [info.name, info.adapter].filter(Boolean).join(" · ");
+  const adapterLine = available
+    ? adapter || "Bluetooth adapter"
+    : info.message || "Bluetooth hardware was not detected on this host.";
+  let devicesMarkup;
+  if (!available) {
+    devicesMarkup = `<p class="bt-note">${escapeHtml(info.message || "Bluetooth hardware was not detected on this host.")}</p>`;
+  } else if (!powered) {
+    devicesMarkup = `<p class="bt-note">Bluetooth is off. Turn it on to connect devices.</p>`;
+  } else if (devices.length === 0) {
+    devicesMarkup = `<p class="bt-note">No devices connected.</p>`;
+  } else {
+    devicesMarkup = devices.map((device) => `
+      <div class="bt-device">
+        <span class="dot online"></span>
+        <span class="bt-device-name">${escapeHtml(device.name || device.mac || "Unknown device")}</span>
+        <span class="bt-device-mac">${escapeHtml(device.mac || "")}</span>
+      </div>
+    `).join("");
+  }
+  const countLabel = !available
+    ? "No adapter"
+    : `${devices.length} device${devices.length === 1 ? "" : "s"} connected`;
+  return `
+    <article class="card usb-card bt-card ${cardClass} ${themeClass}">
+      <div class="card-head usb-head">
+        <div class="icon-wrap">${iconMarkup("bluetooth")}</div>
+        <h2>Bluetooth</h2>
+        <div class="status bt-status ${dotClass}"><span class="dot ${dotClass}"></span>${statusLabel}</div>
+      </div>
+      <p class="bt-adapter">${escapeHtml(adapterLine)}</p>
+      <div class="bt-devices">${devicesMarkup}</div>
+      <p class="bt-error" id="bt-error"></p>
+      <div class="card-foot bt-foot">
+        <div class="latency">${escapeHtml(countLabel)}</div>
+        <label class="bt-switch${available ? "" : " disabled"}">
+          <input type="checkbox" class="bt-toggle-input" role="switch" aria-label="Toggle Bluetooth" ${powered ? "checked" : ""} ${available ? "" : "disabled"}>
+          <span class="bt-switch-track"><span class="bt-switch-thumb"></span></span>
+          <span class="bt-switch-text">${statusLabel}</span>
+        </label>
+      </div>
+    </article>
+  `;
+}
+
 function renderUsbDrives(drives, lastActivity) {
   const grid = document.getElementById("usb-grid");
   const toolbar = document.getElementById("usb-toolbar");
   if (!grid) return;
   if (toolbar) toolbar.style.display = "";
   if (!drives || drives.length === 0) {
-    grid.innerHTML = emptyUsbCard(lastActivity);
+    grid.innerHTML = emptyUsbCard(lastActivity) + bluetoothCardHtml();
     return;
   }
   grid.innerHTML = drives.map((drive) => `
@@ -326,7 +383,7 @@ function renderUsbDrives(drives, lastActivity) {
         <button class="btn danger usb-unmount" type="button" id="${usbButtonId(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
       </div>
     </article>
-  `).join("");
+  `).join("") + bluetoothCardHtml();
 }
 
 async function csrfHeader() {
@@ -448,6 +505,11 @@ function bindUsbGrid() {
     event.stopPropagation();
     confirmUnmount(btn.getAttribute("data-device") || "", btn.getAttribute("data-mountpoint") || "");
   });
+  grid.addEventListener("change", (event) => {
+    const input = event.target.closest(".bt-toggle-input");
+    if (!input) return;
+    setBluetoothPower(input.checked, input);
+  });
 }
 
 async function unmountDrive(device, mountpoint) {
@@ -480,6 +542,39 @@ async function mountDrive() {
   await loadDashboard(true);
 }
 
+async function setBluetoothPower(enabled, input) {
+  const error = document.getElementById("bt-error");
+  if (error) {
+    error.textContent = "";
+    error.classList.remove("show");
+  }
+  if (input) input.disabled = true;
+  try {
+    const headers = Object.assign({ "Content-Type": "application/json" }, await csrfHeader());
+    const res = await fetch("/api/bluetooth/power", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ enabled }),
+      credentials: "same-origin",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(errorDetail(data.detail, "Bluetooth update failed"));
+    }
+    await loadDashboard(true);
+  } catch (err) {
+    if (input) {
+      input.checked = !enabled;
+      input.disabled = false;
+    }
+    const target = document.getElementById("bt-error");
+    if (target) {
+      target.textContent = err.message || "Bluetooth update failed";
+      target.classList.add("show");
+    }
+  }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -509,6 +604,7 @@ async function loadDashboard(refresh = false) {
     applySummary(data.summary);
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
+    bluetoothState = data.server?.bluetooth || null;
     renderUsbDrives(data.server?.usb_drives || [], data.server?.usb_last_activity || "");
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");

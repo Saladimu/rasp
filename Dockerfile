@@ -11,7 +11,7 @@ COPY backend /app/backend
 COPY frontend /app/frontend
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends util-linux \
+    && apt-get install -y --no-install-recommends util-linux bluez \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r /app/backend/requirements.txt \
     && mkdir -p /app/data/icons
