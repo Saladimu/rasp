@@ -187,3 +187,7 @@ class UnmountPayload(BaseModel):
 
 class BluetoothPowerPayload(BaseModel):
     enabled: bool
+
+
+class WiFiPowerPayload(BaseModel):
+    enabled: bool

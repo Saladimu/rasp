@@ -718,7 +718,158 @@ def set_bluetooth_power(enabled: bool) -> tuple[bool, str]:
         return False, state["message"] or _BT_UNAVAILABLE_MESSAGE
     if bool(state["powered"]) != enabled:
         return False, output or "Bluetooth power change was not applied."
+    record_bluetooth_activity()
     return True, output or f"Bluetooth turned {'on' if enabled else 'off'}."
+
+
+_WIFI_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_WIFI_CACHE_TTL = 5.0
+_WIFI_UNAVAILABLE_MESSAGE = "Wi-Fi is not available on this host."
+
+
+def _parse_nmcli_wifi_device(text: str) -> dict[str, str] | None:
+    for line in (text or "").splitlines():
+        parts = line.split(":")
+        if len(parts) < 3:
+            continue
+        device, kind, state = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        connection = ":".join(parts[3:]).strip()
+        if kind == "wifi":
+            return {"interface": device, "state": state, "connection": connection}
+    return None
+
+
+def _wifi_interface() -> str:
+    text = _host_command(["iw", "dev"]) or ""
+    match = re.search(r"^\s*Interface\s+(\S+)", text, re.MULTILINE)
+    if match:
+        return match.group(1)
+    text = _host_command(["ip", "-brief", "link", "show"]) or ""
+    for line in text.splitlines():
+        name = line.split()[0] if line.split() else ""
+        if name.startswith(("wlan", "wlp", "wl")):
+            return name
+    return ""
+
+
+def _wifi_radio_state(interface: str) -> tuple[bool, str]:
+    result = _host_command_result(["nmcli", "radio", "wifi"], timeout=5)
+    if result is not None and result.returncode == 0:
+        text = (result.stdout or "").strip().lower()
+        if text in {"enabled", "disabled"}:
+            return text == "enabled", "nmcli"
+    text = _host_command(["rfkill", "list", "wifi"]) or ""
+    if text:
+        soft = re.search(r"Soft blocked:\s*(yes|no)", text, re.IGNORECASE)
+        hard = re.search(r"Hard blocked:\s*(yes|no)", text, re.IGNORECASE)
+        blocked = (soft and soft.group(1).lower() == "yes") or (
+            hard and hard.group(1).lower() == "yes"
+        )
+        return not blocked, "rfkill"
+    text = _host_command(["ip", "-brief", "link", "show", interface]) or ""
+    if text:
+        flags = text.split("<", 1)[1].split(">", 1)[0] if "<" in text else text
+        return "UP" in flags, ""
+    return False, ""
+
+
+def _wifi_connection_info(interface: str) -> dict[str, str]:
+    info = {"ssid": "", "signal": "", "ip": ""}
+    text = _host_command(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"]) or ""
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) < 3 or parts[0].strip().lower() not in {"yes", "*"}:
+            continue
+        ssid = ":".join(parts[1:-1]).strip().replace("\\:", ":")
+        if ssid:
+            info["ssid"] = ssid
+            info["signal"] = parts[-1].strip()
+            break
+    if not info["ssid"]:
+        text = _host_command(["iwgetid", "-r", interface]) or ""
+        if text:
+            info["ssid"] = text.split("\n", 1)[0].strip()
+    if not info["ssid"]:
+        text = _host_command(["iw", "dev", interface, "link"]) or ""
+        match = re.search(r"^\s*SSID:\s*(.+)$", text, re.MULTILINE)
+        if match:
+            info["ssid"] = match.group(1).strip()
+        match = re.search(r"signal:\s*(-?\d+)\s*dBm", text)
+        if match and not info["signal"]:
+            info["signal"] = f"{match.group(1)} dBm"
+    text = _host_command(["ip", "-4", "-brief", "addr", "show", "dev", interface]) or ""
+    match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+    if match:
+        info["ip"] = match.group(1)
+    return info
+
+
+def collect_wifi() -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _WIFI_CACHE["data"]
+    if cached and now - _WIFI_CACHE["ts"] < _WIFI_CACHE_TTL:
+        return dict(cached)
+
+    info: dict[str, Any] = {
+        "available": False,
+        "powered": False,
+        "interface": "",
+        "ssid": "",
+        "signal": "",
+        "ip": "",
+        "backend": "",
+        "message": _WIFI_UNAVAILABLE_MESSAGE,
+    }
+    device = _parse_nmcli_wifi_device(
+        _host_command(
+            ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"]
+        )
+        or ""
+    )
+    interface = device["interface"] if device else _wifi_interface()
+    if interface:
+        powered, backend = _wifi_radio_state(interface)
+        info.update(
+            {
+                "available": True,
+                "powered": powered,
+                "interface": interface,
+                "backend": backend,
+                "message": "",
+            }
+        )
+        if powered:
+            info.update(
+                {key: value for key, value in _wifi_connection_info(interface).items() if value}
+            )
+    else:
+        info["message"] = "No wireless interface found."
+    _WIFI_CACHE["data"] = info
+    _WIFI_CACHE["ts"] = now
+    return dict(info)
+
+
+def set_wifi_power(enabled: bool) -> tuple[bool, str]:
+    state = collect_wifi()
+    if not state["available"]:
+        return False, state["message"] or _WIFI_UNAVAILABLE_MESSAGE
+    if state["backend"] == "nmcli":
+        args = ["nmcli", "radio", "wifi", "on" if enabled else "off"]
+    else:
+        args = ["rfkill", "unblock" if enabled else "block", "wifi"]
+    result = _host_command_result(args, timeout=10)
+    _WIFI_CACHE["data"] = None
+    _WIFI_CACHE["ts"] = 0.0
+    if result is None:
+        return False, _WIFI_UNAVAILABLE_MESSAGE
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+    if result.returncode != 0:
+        return False, output or "Wi-Fi power change failed."
+    fresh = collect_wifi()
+    if bool(fresh["powered"]) != enabled:
+        return False, output or "Wi-Fi power change was not applied."
+    record_wifi_activity()
+    return True, output or f"Wi-Fi turned {'on' if enabled else 'off'}."
 
 
 def _get_parent_block_device(device: str) -> str:
@@ -997,9 +1148,11 @@ def unhide_usb_mount(mountpoint: str) -> None:
 
 
 _USB_ACTIVITY_KEY = "usb_last_activity"
+_BLUETOOTH_ACTIVITY_KEY = "bluetooth_last_activity"
+_WIFI_ACTIVITY_KEY = "wifi_last_activity"
 
 
-def record_usb_activity() -> str:
+def _record_activity(key: str) -> str:
     from .database import db_session
 
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -1007,22 +1160,46 @@ def record_usb_activity() -> str:
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (_USB_ACTIVITY_KEY, stamp),
+            (key, stamp),
         )
     return stamp
 
 
-def get_usb_last_activity() -> str:
+def _get_activity(key: str) -> str:
     from .database import db_session
 
     try:
         with db_session() as conn:
             row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (_USB_ACTIVITY_KEY,)
+                "SELECT value FROM settings WHERE key = ?", (key,)
             ).fetchone()
     except Exception:
         return ""
     return (row["value"] if row else "") or ""
+
+
+def record_usb_activity() -> str:
+    return _record_activity(_USB_ACTIVITY_KEY)
+
+
+def get_usb_last_activity() -> str:
+    return _get_activity(_USB_ACTIVITY_KEY)
+
+
+def record_bluetooth_activity() -> str:
+    return _record_activity(_BLUETOOTH_ACTIVITY_KEY)
+
+
+def get_bluetooth_last_activity() -> str:
+    return _get_activity(_BLUETOOTH_ACTIVITY_KEY)
+
+
+def record_wifi_activity() -> str:
+    return _record_activity(_WIFI_ACTIVITY_KEY)
+
+
+def get_wifi_last_activity() -> str:
+    return _get_activity(_WIFI_ACTIVITY_KEY)
 
 
 def _is_hidden_mount(mountpoint: str) -> bool:
@@ -1134,6 +1311,9 @@ def collect_server_info() -> dict[str, Any]:
         fresh = dict(cached)
         fresh["usb_drives"] = collect_usb_drives()
         fresh["bluetooth"] = collect_bluetooth()
+        fresh["bluetooth_last_activity"] = get_bluetooth_last_activity()
+        fresh["wifi"] = collect_wifi()
+        fresh["wifi_last_activity"] = get_wifi_last_activity()
         _CACHE["data"] = fresh
         return fresh
 
@@ -1222,6 +1402,9 @@ def collect_server_info() -> dict[str, Any]:
         "usb_drives": collect_usb_drives(),
         "usb_last_activity": get_usb_last_activity(),
         "bluetooth": collect_bluetooth(),
+        "bluetooth_last_activity": get_bluetooth_last_activity(),
+        "wifi": collect_wifi(),
+        "wifi_last_activity": get_wifi_last_activity(),
     }
     _CACHE["data"] = result
     _CACHE["ts"] = now

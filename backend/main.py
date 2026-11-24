@@ -41,6 +41,7 @@ from .models import (
     RunCommandPayload,
     UnmountPayload,
     VisibilityPayload,
+    WiFiPowerPayload,
 )
 from .seed import bootstrap
 from .serverinfo import collect_server_info
@@ -713,6 +714,21 @@ def set_bluetooth_power_endpoint(payload: BluetoothPowerPayload, _: str = Depend
         "ok": True,
         "enabled": payload.enabled,
         "message": message or f"Bluetooth turned {'on' if payload.enabled else 'off'}",
+    }
+
+
+@app.post("/api/wifi/power")
+def set_wifi_power_endpoint(payload: WiFiPowerPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    from .serverinfo import set_wifi_power
+
+    ok, message = set_wifi_power(payload.enabled)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    _clear_server_cache()
+    return {
+        "ok": True,
+        "enabled": payload.enabled,
+        "message": message or f"Wi-Fi turned {'on' if payload.enabled else 'off'}",
     }
 
 

@@ -5,6 +5,7 @@ A lightweight, self-hosted control panel for a personal home server. It provides
 ## Features
 
 - Responsive dashboard for File Browser, FreeLLMAPI, Telegram Bot, personal websites, and extra apps you add
+- Connectivity section for USB drives, Bluetooth, and Wireless LAN with power toggles, connected devices, and last activity
 - Backend health checks over HTTP, HTTPS, or TCP (avoids browser CORS limits)
 - 24h/7d uptime history, latency bars, and sparklines from stored probe results
 - Telegram or HTTPS webhook alerts after consecutive failures, with optional quiet hours
@@ -152,6 +153,10 @@ Admin (session cookie required):
 - `POST /api/admin/healthcheck-hosts`
 - `PUT /api/admin/healthcheck-hosts`
 - `DELETE /api/admin/healthcheck-hosts?host=`
+- `POST /api/usb/mount`
+- `POST /api/usb/unmount`
+- `POST /api/bluetooth/power`
+- `POST /api/wifi/power`
 - `POST /api/admin/icons`
 
 Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_csrf` cookie.

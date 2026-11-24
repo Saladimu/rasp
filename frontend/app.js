@@ -266,10 +266,10 @@ function formatUsbActivity(iso) {
   return `${day}-${month} ${hours}:${minutes}`;
 }
 
-function usbActivityLine(lastActivity, folder) {
+function activityLine(lastActivity, label) {
   const stamp = formatUsbActivity(lastActivity) || "—";
   return `<p class="usb-activity">
-        <span class="usb-folder">${escapeHtml(folder || "/mnt/usb")}</span>
+        <span class="usb-folder">${escapeHtml(label || "—")}</span>
         <span class="usb-activity-time">last activity: ${escapeHtml(stamp)}</span>
       </p>`;
 }
@@ -282,7 +282,7 @@ function emptyUsbCard(lastActivity) {
         <h2>USB Drive</h2>
         <div class="status"><span class="dot unknown"></span>Unmounted</div>
       </div>
-      ${usbActivityLine(lastActivity, "/mnt/usb")}
+      ${activityLine(lastActivity, "/mnt/usb")}
       <div class="usb-meta">
         <span>Label: —</span>
         <span>Firmware: —</span>
@@ -299,20 +299,26 @@ function emptyUsbCard(lastActivity) {
 }
 
 let bluetoothState = null;
+let bluetoothLastActivity = "";
+let wifiState = null;
+let wifiLastActivity = "";
+
+function statusClasses(available, powered) {
+  return {
+    statusLabel: !available ? "Unavailable" : powered ? "On" : "Off",
+    dotClass: !available ? "unknown" : powered ? "online" : "offline",
+    themeClass: !available ? "bt-unavailable" : powered ? "bt-on" : "bt-off",
+    cardClass: !available ? "card-unknown" : powered ? "card-online" : "card-offline",
+  };
+}
 
 function bluetoothCardHtml() {
   const info = bluetoothState || {};
   const available = Boolean(info.available);
   const powered = Boolean(info.powered);
   const devices = Array.isArray(info.devices) ? info.devices : [];
-  const statusLabel = !available ? "Unavailable" : powered ? "On" : "Off";
-  const dotClass = !available ? "unknown" : powered ? "online" : "offline";
-  const themeClass = !available ? "bt-unavailable" : powered ? "bt-on" : "bt-off";
-  const cardClass = !available ? "card-unknown" : powered ? "card-online" : "card-offline";
-  const adapter = [info.name, info.adapter].filter(Boolean).join(" · ");
-  const adapterLine = available
-    ? adapter || "Bluetooth adapter"
-    : info.message || "Bluetooth hardware was not detected on this host.";
+  const { statusLabel, dotClass, themeClass, cardClass } = statusClasses(available, powered);
+  const adapterLabel = info.name || info.adapter || "Bluetooth";
   let devicesMarkup;
   if (!available) {
     devicesMarkup = `<p class="bt-note">${escapeHtml(info.message || "Bluetooth hardware was not detected on this host.")}</p>`;
@@ -339,7 +345,11 @@ function bluetoothCardHtml() {
         <h2>Bluetooth</h2>
         <div class="status bt-status ${dotClass}"><span class="dot ${dotClass}"></span>${statusLabel}</div>
       </div>
-      <p class="bt-adapter">${escapeHtml(adapterLine)}</p>
+      ${activityLine(bluetoothLastActivity, adapterLabel)}
+      <div class="bt-meta">
+        <span>Name: ${escapeHtml(info.name || "—")}</span>
+        <span>Address: ${escapeHtml(info.adapter || "—")}</span>
+      </div>
       <div class="bt-devices">${devicesMarkup}</div>
       <p class="bt-error" id="bt-error"></p>
       <div class="card-foot bt-foot">
@@ -354,13 +364,67 @@ function bluetoothCardHtml() {
   `;
 }
 
+function wifiSignalLabel(signal) {
+  const value = String(signal || "").trim();
+  if (!value) return "—";
+  return /^\d+$/.test(value) ? `${value}%` : value;
+}
+
+function wifiCardHtml() {
+  const info = wifiState || {};
+  const available = Boolean(info.available);
+  const powered = Boolean(info.powered);
+  const { statusLabel, dotClass, themeClass, cardClass } = statusClasses(available, powered);
+  const ssid = info.ssid || "";
+  const note = !available
+    ? info.message || "Wi-Fi hardware was not detected on this host."
+    : !powered
+      ? "Wi-Fi is off. Turn it on to connect."
+      : ssid
+        ? ""
+        : "Not connected to a wireless network.";
+  const countLabel = !available
+    ? "No adapter"
+    : powered
+      ? ssid
+        ? `Connected to ${ssid}`
+        : "Not connected"
+      : "Radio off";
+  return `
+    <article class="card usb-card wifi-card ${cardClass} ${themeClass}">
+      <div class="card-head usb-head">
+        <div class="icon-wrap">${iconMarkup("wifi")}</div>
+        <h2>Wireless LAN</h2>
+        <div class="status bt-status wifi-status ${dotClass}"><span class="dot ${dotClass}"></span>${statusLabel}</div>
+      </div>
+      ${activityLine(wifiLastActivity, ssid || info.interface || "Wi-Fi")}
+      <div class="wifi-meta">
+        <span>Interface: ${escapeHtml(info.interface || "—")}</span>
+        <span>SSID: ${escapeHtml(ssid || "—")}</span>
+        <span>Signal: ${escapeHtml(wifiSignalLabel(info.signal))}</span>
+        <span>IP: ${escapeHtml(info.ip || "—")}</span>
+      </div>
+      ${note ? `<p class="bt-note">${escapeHtml(note)}</p>` : ""}
+      <p class="bt-error" id="wifi-error"></p>
+      <div class="card-foot bt-foot">
+        <div class="latency">${escapeHtml(countLabel)}</div>
+        <label class="bt-switch${available ? "" : " disabled"}">
+          <input type="checkbox" class="wifi-toggle-input" role="switch" aria-label="Toggle Wi-Fi" ${powered ? "checked" : ""} ${available ? "" : "disabled"}>
+          <span class="bt-switch-track"><span class="bt-switch-thumb"></span></span>
+          <span class="bt-switch-text">${statusLabel}</span>
+        </label>
+      </div>
+    </article>
+  `;
+}
+
 function renderUsbDrives(drives, lastActivity) {
   const grid = document.getElementById("usb-grid");
   const toolbar = document.getElementById("usb-toolbar");
   if (!grid) return;
   if (toolbar) toolbar.style.display = "";
   if (!drives || drives.length === 0) {
-    grid.innerHTML = emptyUsbCard(lastActivity) + bluetoothCardHtml();
+    grid.innerHTML = emptyUsbCard(lastActivity) + bluetoothCardHtml() + wifiCardHtml();
     return;
   }
   grid.innerHTML = drives.map((drive) => `
@@ -370,7 +434,7 @@ function renderUsbDrives(drives, lastActivity) {
         <h2>USB Drive</h2>
         <div class="status"><span class="dot online"></span>Mounted</div>
       </div>
-      ${usbActivityLine(lastActivity, drive.mountpoint)}
+      ${activityLine(lastActivity, drive.mountpoint)}
       <div class="usb-meta">
         <span>Label: ${escapeHtml(drive.label)}</span>
         <span>Firmware: ${escapeHtml(drive.firmware)}</span>
@@ -383,7 +447,7 @@ function renderUsbDrives(drives, lastActivity) {
         <button class="btn danger usb-unmount" type="button" id="${usbButtonId(drive.device)}" data-device="${escapeAttr(drive.device)}" data-mountpoint="${escapeAttr(drive.mountpoint)}">Unmount</button>
       </div>
     </article>
-  `).join("") + bluetoothCardHtml();
+  `).join("") + bluetoothCardHtml() + wifiCardHtml();
 }
 
 async function csrfHeader() {
@@ -506,9 +570,13 @@ function bindUsbGrid() {
     confirmUnmount(btn.getAttribute("data-device") || "", btn.getAttribute("data-mountpoint") || "");
   });
   grid.addEventListener("change", (event) => {
-    const input = event.target.closest(".bt-toggle-input");
-    if (!input) return;
-    setBluetoothPower(input.checked, input);
+    const bluetooth = event.target.closest(".bt-toggle-input");
+    if (bluetooth) {
+      setBluetoothPower(bluetooth.checked, bluetooth);
+      return;
+    }
+    const wifi = event.target.closest(".wifi-toggle-input");
+    if (wifi) setWifiPower(wifi.checked, wifi);
   });
 }
 
@@ -542,8 +610,8 @@ async function mountDrive() {
   await loadDashboard(true);
 }
 
-async function setBluetoothPower(enabled, input) {
-  const error = document.getElementById("bt-error");
+async function setFeaturePower(url, enabled, input, errorId, fallback) {
+  const error = document.getElementById(errorId);
   if (error) {
     error.textContent = "";
     error.classList.remove("show");
@@ -551,7 +619,7 @@ async function setBluetoothPower(enabled, input) {
   if (input) input.disabled = true;
   try {
     const headers = Object.assign({ "Content-Type": "application/json" }, await csrfHeader());
-    const res = await fetch("/api/bluetooth/power", {
+    const res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify({ enabled }),
@@ -559,7 +627,7 @@ async function setBluetoothPower(enabled, input) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(errorDetail(data.detail, "Bluetooth update failed"));
+      throw new Error(errorDetail(data.detail, fallback));
     }
     await loadDashboard(true);
   } catch (err) {
@@ -567,12 +635,20 @@ async function setBluetoothPower(enabled, input) {
       input.checked = !enabled;
       input.disabled = false;
     }
-    const target = document.getElementById("bt-error");
+    const target = document.getElementById(errorId);
     if (target) {
-      target.textContent = err.message || "Bluetooth update failed";
+      target.textContent = err.message || fallback;
       target.classList.add("show");
     }
   }
+}
+
+function setBluetoothPower(enabled, input) {
+  return setFeaturePower("/api/bluetooth/power", enabled, input, "bt-error", "Bluetooth update failed");
+}
+
+function setWifiPower(enabled, input) {
+  return setFeaturePower("/api/wifi/power", enabled, input, "wifi-error", "Wi-Fi update failed");
 }
 
 function escapeHtml(value) {
@@ -605,6 +681,9 @@ async function loadDashboard(refresh = false) {
     renderCards("app-grid", data.apps || [], data.statuses || [], "No applications registered yet.", "Open Application");
     renderCards("website-grid", data.websites || [], data.website_statuses || [], "No personal websites registered yet.", "Open Website");
     bluetoothState = data.server?.bluetooth || null;
+    bluetoothLastActivity = data.server?.bluetooth_last_activity || "";
+    wifiState = data.server?.wifi || null;
+    wifiLastActivity = data.server?.wifi_last_activity || "";
     renderUsbDrives(data.server?.usb_drives || [], data.server?.usb_last_activity || "");
     const waiting = [...(data.statuses || []), ...(data.website_statuses || [])]
       .some((item) => item.status === "unknown" && item.message === "Waiting for first check");

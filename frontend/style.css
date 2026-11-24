@@ -562,18 +562,23 @@ html[data-theme="light"] .stat.temp-unknown {
 }
 
 .usb-folder {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .usb-activity-time {
+  flex: 0 0 auto;
   margin-left: auto;
   text-align: right;
   white-space: nowrap;
 }
 
-.usb-meta {
+.usb-meta,
+.bt-meta,
+.wifi-meta {
   display: grid;
   gap: 4px;
   margin-top: 10px;
@@ -651,12 +656,6 @@ html[data-theme="light"] .stat.temp-unknown {
   background: rgba(248, 113, 113, 0.12);
 }
 
-.bt-adapter {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .bt-devices {
   display: grid;
   gap: 6px;
@@ -701,14 +700,14 @@ html[data-theme="light"] .stat.temp-unknown {
   font-size: 0.82rem;
 }
 
-.bt-error {
+.usb-card .bt-error {
   display: none;
   margin: 8px 0 0;
   color: var(--danger);
   font-size: 0.78rem;
 }
 
-.bt-error.show {
+.usb-card .bt-error.show {
   display: block;
 }
 
@@ -760,16 +759,19 @@ html[data-theme="light"] .stat.temp-unknown {
   transition: transform 0.18s ease;
 }
 
-.bt-toggle-input:checked + .bt-switch-track {
+.bt-toggle-input:checked + .bt-switch-track,
+.wifi-toggle-input:checked + .bt-switch-track {
   background: var(--online);
   border-color: var(--bt-on-line);
 }
 
-.bt-toggle-input:checked + .bt-switch-track .bt-switch-thumb {
+.bt-toggle-input:checked + .bt-switch-track .bt-switch-thumb,
+.wifi-toggle-input:checked + .bt-switch-track .bt-switch-thumb {
   transform: translateX(18px);
 }
 
-.bt-toggle-input:focus-visible + .bt-switch-track {
+.bt-toggle-input:focus-visible + .bt-switch-track,
+.wifi-toggle-input:focus-visible + .bt-switch-track {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1083,6 +1085,24 @@ input, textarea, select {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  .usb-card p {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+  .usb-activity {
+    flex-wrap: wrap;
+  }
+  .usb-activity-time {
+    margin-left: 0;
+  }
+  .bt-device {
+    flex-wrap: wrap;
+  }
+  .bt-device-mac {
+    flex-basis: 100%;
+    padding-left: 16px;
   }
   .uptime-row { margin-top: 10px; }
   .sparkline { height: 22px; }
