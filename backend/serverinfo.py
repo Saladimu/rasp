@@ -702,7 +702,24 @@ def collect_bluetooth() -> dict[str, Any]:
     return dict(info)
 
 
+def _set_bluetooth_discovery(enabled: bool) -> tuple[bool, str]:
+    action = "on" if enabled else "off"
+    messages: list[str] = []
+    for feature in ("discoverable", "pairable"):
+        result = _host_command_result(["bluetoothctl", feature, action], timeout=10)
+        if result is None:
+            return False, f"bluetoothctl {feature} {action} failed."
+        output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+        if result.returncode != 0:
+            return False, output or f"bluetoothctl {feature} {action} failed."
+        if output:
+            messages.append(output)
+    return True, "\n".join(messages)
+
+
 def set_bluetooth_power(enabled: bool) -> tuple[bool, str]:
+    if not enabled:
+        _set_bluetooth_discovery(False)
     result = _host_command_result(
         ["bluetoothctl", "power", "on" if enabled else "off"], timeout=10
     )
@@ -718,8 +735,16 @@ def set_bluetooth_power(enabled: bool) -> tuple[bool, str]:
         return False, state["message"] or _BT_UNAVAILABLE_MESSAGE
     if bool(state["powered"]) != enabled:
         return False, output or "Bluetooth power change was not applied."
+    discovery_output = ""
+    if enabled:
+        ok, discovery_output = _set_bluetooth_discovery(True)
+        if not ok:
+            _host_command_result(["bluetoothctl", "power", "off"], timeout=10)
+            _BT_CACHE["data"] = None
+            _BT_CACHE["ts"] = 0.0
+            return False, discovery_output
     record_bluetooth_activity()
-    return True, output or f"Bluetooth turned {'on' if enabled else 'off'}."
+    return True, discovery_output or output or f"Bluetooth turned {'on' if enabled else 'off'}."
 
 
 _WIFI_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}

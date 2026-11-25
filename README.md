@@ -6,6 +6,7 @@ A lightweight, self-hosted control panel for a personal home server. It provides
 
 - Responsive dashboard for File Browser, FreeLLMAPI, Telegram Bot, personal websites, and extra apps you add
 - Connectivity section for USB drives, Bluetooth, and Wireless LAN with power toggles, connected devices, and last activity
+- Bluetooth power toggle also sets the adapter discoverable and pairable
 - Backend health checks over HTTP, HTTPS, or TCP (avoids browser CORS limits)
 - 24h/7d uptime history, latency bars, and sparklines from stored probe results
 - Telegram or HTTPS webhook alerts after consecutive failures, with optional quiet hours
