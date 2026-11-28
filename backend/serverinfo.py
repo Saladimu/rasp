@@ -751,6 +751,8 @@ _WIFI_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
 _WIFI_CACHE_TTL = 5.0
 _WIFI_LAST_GOOD: dict[str, Any] = {"data": None, "ts": 0.0}
 _WIFI_LAST_GOOD_TTL = 120.0
+_WIFI_LAST_CONNECTED: dict[str, Any] = {"data": None, "ts": 0.0}
+_WIFI_LAST_CONNECTED_TTL = 90.0
 _WIFI_UNAVAILABLE_MESSAGE = "Wi-Fi is not available on this host."
 
 
@@ -826,34 +828,78 @@ def _wifi_ip_address(interface: str) -> str:
     return match.group(1) if match else ""
 
 
-def _wifi_connection_info(interface: str) -> dict[str, str]:
-    info = {"ssid": "", "signal": "", "ip": ""}
-    text = _host_command(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"]) or ""
+def _wifi_device_details(interface: str) -> dict[str, str]:
+    details = {"state": "", "connection": "", "ip": ""}
+    text = (
+        _host_stdout(
+            [
+                "nmcli",
+                "-t",
+                "-f",
+                "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS",
+                "device",
+                "show",
+                interface,
+            ],
+            timeout=5,
+        )
+        or ""
+    )
     for line in text.splitlines():
-        parts = line.split(":")
+        fields = _split_nmcli_fields(line)
+        if len(fields) < 2:
+            continue
+        key = fields[0].strip()
+        value = ":".join(fields[1:]).strip()
+        if key.startswith("GENERAL.STATE"):
+            details["state"] = value
+        elif key.startswith("GENERAL.CONNECTION"):
+            details["connection"] = "" if value in {"", "--"} else value
+        elif key.startswith("IP4.ADDRESS"):
+            match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", value)
+            if match and not details["ip"]:
+                details["ip"] = match.group(1)
+    return details
+
+
+def _wifi_connection_info(interface: str) -> dict[str, str]:
+    info = {"ssid": "", "signal": "", "ip": "", "_state": "unknown"}
+    details = _wifi_device_details(interface)
+    if details["state"]:
+        connected = details["state"].startswith("100") or details["state"].lower() == "connected"
+        info["_state"] = "connected" if connected else "disconnected"
+    text = _host_stdout(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"], timeout=5) or ""
+    for line in text.splitlines():
+        parts = _split_nmcli_fields(line)
         if len(parts) < 3 or parts[0].strip().lower() not in {"yes", "*"}:
             continue
-        ssid = ":".join(parts[1:-1]).strip().replace("\\:", ":")
+        ssid = ":".join(parts[1:-1]).strip()
         if ssid:
             info["ssid"] = ssid
             info["signal"] = parts[-1].strip()
             break
+    if not info["ssid"] and info["_state"] == "connected" and details["connection"]:
+        # The scan list can briefly omit the active AP; the connection name
+        # from NetworkManager is the next best SSID source.
+        info["ssid"] = details["connection"]
     if not info["ssid"]:
-        text = _host_command(["iwgetid", "-r", interface]) or ""
+        text = _host_stdout(["iwgetid", "-r", interface], timeout=5) or ""
         if text:
             info["ssid"] = text.split("\n", 1)[0].strip()
     if not info["ssid"]:
-        text = _host_command(["iw", "dev", interface, "link"]) or ""
+        text = _host_stdout(["iw", "dev", interface, "link"], timeout=5) or ""
         match = re.search(r"^\s*SSID:\s*(.+)$", text, re.MULTILINE)
         if match:
             info["ssid"] = match.group(1).strip()
         match = re.search(r"signal:\s*(-?\d+)\s*dBm", text)
         if match and not info["signal"]:
             info["signal"] = f"{match.group(1)} dBm"
-    text = _host_command(["ip", "-4", "-brief", "addr", "show", "dev", interface]) or ""
-    match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
-    if match:
-        info["ip"] = match.group(1)
+    info["ip"] = details["ip"]
+    if not info["ip"]:
+        text = _host_command(["ip", "-4", "-brief", "addr", "show", "dev", interface]) or ""
+        match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+        if match:
+            info["ip"] = match.group(1)
     if not info["ip"]:
         info["ip"] = _wifi_ip_address(interface)
     return info
@@ -995,9 +1041,22 @@ def collect_wifi() -> dict[str, Any]:
             }
         )
         if powered:
+            connection = _wifi_connection_info(interface)
             info.update(
-                {key: value for key, value in _wifi_connection_info(interface).items() if value}
+                {key: value for key, value in connection.items() if value and not key.startswith("_")}
             )
+            if not info["ssid"] and device:
+                device_state = (device.get("state") or "").lower()
+                if device_state in {"connected", "connecting"} and device.get("connection"):
+                    info["ssid"] = device["connection"]
+            if not info["ssid"] and connection.get("_state") == "unknown":
+                last = _WIFI_LAST_CONNECTED["data"]
+                if last and now - _WIFI_LAST_CONNECTED["ts"] <= _WIFI_LAST_CONNECTED_TTL:
+                    # All connection lookups failed at once; keep the last
+                    # connected reading instead of showing "Not connected".
+                    info["ssid"] = last.get("ssid", "")
+                    info["signal"] = info["signal"] or last.get("signal", "")
+                    info["ip"] = info["ip"] or last.get("ip", "")
         info["networks"] = _wifi_networks(info["ssid"])
     else:
         info["message"] = "No wireless interface found."
@@ -1010,6 +1069,9 @@ def collect_wifi() -> dict[str, Any]:
     else:
         _WIFI_LAST_GOOD["data"] = dict(info)
         _WIFI_LAST_GOOD["ts"] = now
+        if info["powered"] and info["ssid"]:
+            _WIFI_LAST_CONNECTED["data"] = dict(info)
+            _WIFI_LAST_CONNECTED["ts"] = now
     _WIFI_CACHE["data"] = info
     _WIFI_CACHE["ts"] = now
     return dict(info)
