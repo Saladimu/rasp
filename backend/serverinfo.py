@@ -749,6 +749,8 @@ def set_bluetooth_power(enabled: bool) -> tuple[bool, str]:
 
 _WIFI_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
 _WIFI_CACHE_TTL = 5.0
+_WIFI_LAST_GOOD: dict[str, Any] = {"data": None, "ts": 0.0}
+_WIFI_LAST_GOOD_TTL = 120.0
 _WIFI_UNAVAILABLE_MESSAGE = "Wi-Fi is not available on this host."
 
 
@@ -798,6 +800,32 @@ def _wifi_radio_state(interface: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _wifi_ip_address(interface: str) -> str:
+    # nmcli can report the address through NetworkManager even when the
+    # container is not in the host network namespace.
+    text = (
+        _host_stdout(
+            ["nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", interface],
+            timeout=5,
+        )
+        or ""
+    )
+    match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+    if match:
+        return match.group(1)
+    # ip needs the host network namespace, unlike the mount-only nsenter used
+    # by _host_command.
+    text = (
+        _host_stdout(
+            ["ip", "-4", "-brief", "addr", "show", "dev", interface],
+            timeout=5,
+        )
+        or ""
+    )
+    match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+    return match.group(1) if match else ""
+
+
 def _wifi_connection_info(interface: str) -> dict[str, str]:
     info = {"ssid": "", "signal": "", "ip": ""}
     text = _host_command(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"]) or ""
@@ -826,6 +854,8 @@ def _wifi_connection_info(interface: str) -> dict[str, str]:
     match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
     if match:
         info["ip"] = match.group(1)
+    if not info["ip"]:
+        info["ip"] = _wifi_ip_address(interface)
     return info
 
 
@@ -971,6 +1001,15 @@ def collect_wifi() -> dict[str, Any]:
         info["networks"] = _wifi_networks(info["ssid"])
     else:
         info["message"] = "No wireless interface found."
+    if not info["available"]:
+        last = _WIFI_LAST_GOOD["data"]
+        if last and now - _WIFI_LAST_GOOD["ts"] <= _WIFI_LAST_GOOD_TTL:
+            # Detection can fail briefly during a rescan; keep the last
+            # readable snapshot instead of flashing an empty card.
+            info = dict(last)
+    else:
+        _WIFI_LAST_GOOD["data"] = dict(info)
+        _WIFI_LAST_GOOD["ts"] = now
     _WIFI_CACHE["data"] = info
     _WIFI_CACHE["ts"] = now
     return dict(info)
