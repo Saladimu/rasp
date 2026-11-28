@@ -191,3 +191,18 @@ class BluetoothPowerPayload(BaseModel):
 
 class WiFiPowerPayload(BaseModel):
     enabled: bool
+
+
+class WiFiConnectPayload(BaseModel):
+    ssid: str = Field(min_length=1, max_length=64)
+    password: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("ssid")
+    @classmethod
+    def strip_ssid(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("SSID is required.")
+        if stripped.startswith("-"):
+            raise ValueError("SSID must not start with '-'.")
+        return stripped

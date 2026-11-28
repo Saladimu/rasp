@@ -302,6 +302,9 @@ let bluetoothState = null;
 let bluetoothLastActivity = "";
 let wifiState = null;
 let wifiLastActivity = "";
+let wifiSelectedSsid = "";
+let wifiBusy = false;
+let adminAuthenticated = false;
 
 function statusClasses(available, powered) {
   return {
@@ -370,6 +373,54 @@ function wifiSignalLabel(signal) {
   return /^\d+$/.test(value) ? `${value}%` : value;
 }
 
+function wifiNetworks() {
+  const networks = wifiState?.networks;
+  return Array.isArray(networks) ? networks.filter((item) => item && item.ssid) : [];
+}
+
+function wifiOptionLabel(network) {
+  const signal = Math.max(0, Math.min(100, Number(network.signal) || 0));
+  const state = network.active ? " (Connected)" : network.saved ? " (Saved)" : "";
+  return `${network.ssid}${state} · ${signal}%`;
+}
+
+function wifiControlsVisible() {
+  const info = wifiState || {};
+  const enabled = info.enabled === undefined ? info.powered : info.enabled;
+  return Boolean(adminAuthenticated && enabled);
+}
+
+function wifiDropdownValue(networks) {
+  if (wifiSelectedSsid && networks.some((item) => item.ssid === wifiSelectedSsid)) {
+    return wifiSelectedSsid;
+  }
+  const active = networks.find((item) => item.active);
+  return active ? active.ssid : (networks[0]?.ssid || "");
+}
+
+function wifiControlsHtml() {
+  const networks = wifiNetworks();
+  const selected = wifiDropdownValue(networks);
+  const options = networks.length
+    ? networks.map((network) => `<option value="${escapeAttr(network.ssid)}"${network.ssid === selected ? " selected" : ""}>${escapeHtml(wifiOptionLabel(network))}</option>`).join("")
+    : '<option value="">No networks found</option>';
+  const hiddenClass = wifiControlsVisible() ? "" : " hidden";
+  const connectDisabled = !networks.length || wifiBusy ? " disabled" : "";
+  const rescanDisabled = wifiBusy ? " disabled" : "";
+  return `
+      <div class="wifi-select-wrap${hiddenClass}" id="wifi-select-wrap">
+        <label class="wifi-select-label" for="wifi-ssid-select">Network</label>
+        <div class="wifi-select-row">
+          <select class="wifi-select" id="wifi-ssid-select" aria-label="Wi-Fi network"${networks.length ? "" : " disabled"}>${options}</select>
+          <div class="wifi-actions">
+            <button class="btn wifi-connect-btn" type="button" id="wifi-connect-btn"${connectDisabled}>Connect</button>
+            <button class="btn secondary wifi-rescan-btn" type="button" id="wifi-rescan-btn"${rescanDisabled}>Rescan</button>
+          </div>
+        </div>
+      </div>
+  `;
+}
+
 function wifiCardHtml() {
   const info = wifiState || {};
   const available = Boolean(info.available);
@@ -391,7 +442,7 @@ function wifiCardHtml() {
         : "Not connected"
       : "Radio off";
   return `
-    <article class="card usb-card wifi-card ${cardClass} ${themeClass}">
+    <article class="card usb-card wifi-card ${cardClass} ${themeClass}" id="wifi-card">
       <div class="card-head usb-head">
         <div class="icon-wrap">${iconMarkup("wifi")}</div>
         <h2>Wireless LAN</h2>
@@ -406,6 +457,7 @@ function wifiCardHtml() {
       </div>
       ${note ? `<p class="bt-note">${escapeHtml(note)}</p>` : ""}
       <p class="bt-error" id="wifi-error"></p>
+      ${wifiControlsHtml()}
       <div class="card-foot bt-foot">
         <div class="latency">${escapeHtml(countLabel)}</div>
         <label class="bt-switch${available ? "" : " disabled"}">
@@ -416,6 +468,99 @@ function wifiCardHtml() {
       </div>
     </article>
   `;
+}
+
+function renderWifiCard() {
+  const card = document.querySelector("#usb-grid .wifi-card");
+  if (!card) return;
+  card.outerHTML = wifiCardHtml();
+}
+
+function syncWifiControls() {
+  const wrap = document.getElementById("wifi-select-wrap");
+  if (!wrap) return;
+  wrap.classList.toggle("hidden", !wifiControlsVisible());
+}
+
+async function syncAdminSession() {
+  adminAuthenticated = await checkAdminSession();
+  syncWifiControls();
+}
+
+function setWifiBusy(busy) {
+  wifiBusy = busy;
+  document.querySelectorAll("#wifi-connect-btn, #wifi-rescan-btn").forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+function setWifiError(message) {
+  const target = document.getElementById("wifi-error");
+  if (!target) return;
+  target.textContent = message || "";
+  target.classList.toggle("show", Boolean(message));
+}
+
+async function postWifiAction(url, body) {
+  const headers = Object.assign({ "Content-Type": "application/json" }, await csrfHeader());
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    credentials: "same-origin",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(errorDetail(data.detail, "Wi-Fi request failed"));
+  }
+  return data;
+}
+
+async function connectWifi() {
+  if (wifiBusy) return;
+  const select = document.getElementById("wifi-ssid-select");
+  const ssid = (select?.value || wifiSelectedSsid || "").trim();
+  if (!ssid) return;
+  const network = wifiNetworks().find((item) => item.ssid === ssid);
+  let password = null;
+  if (!network || (!network.saved && !network.active)) {
+    const answer = window.prompt(`Enter the password for ${ssid}`, "");
+    if (answer === null) return;
+    password = answer;
+  }
+  setWifiBusy(true);
+  setWifiError("");
+  let errorMessage = "";
+  try {
+    const payload = { ssid };
+    if (password !== null) payload.password = password;
+    const data = await postWifiAction("/api/admin/wifi/connect", payload);
+    if (data.wifi) wifiState = data.wifi;
+    wifiSelectedSsid = ssid;
+  } catch (err) {
+    errorMessage = err.message || "Wi-Fi connection failed";
+  }
+  setWifiBusy(false);
+  renderWifiCard();
+  if (errorMessage) setWifiError(errorMessage);
+  else loadDashboard(false);
+}
+
+async function rescanWifi() {
+  if (wifiBusy) return;
+  setWifiBusy(true);
+  setWifiError("");
+  let errorMessage = "";
+  try {
+    const data = await postWifiAction("/api/admin/wifi/rescan");
+    if (data.wifi) wifiState = data.wifi;
+  } catch (err) {
+    errorMessage = err.message || "Wi-Fi rescan failed";
+  }
+  setWifiBusy(false);
+  renderWifiCard();
+  if (errorMessage) setWifiError(errorMessage);
+  else loadDashboard(false);
 }
 
 function renderUsbDrives(drives, lastActivity) {
@@ -455,7 +600,11 @@ async function csrfHeader() {
     const res = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) return {};
     const data = await res.json();
-    if (!data.authenticated || !data.csrf_token) return {};
+    if (!data.authenticated || !data.csrf_token) {
+      adminAuthenticated = false;
+      return {};
+    }
+    adminAuthenticated = true;
     return { "X-CSRF-Token": data.csrf_token };
   } catch (_err) {
     return {};
@@ -556,6 +705,20 @@ function bindUsbGrid() {
   if (!grid || grid.dataset.bound === "1") return;
   grid.dataset.bound = "1";
   grid.addEventListener("click", (event) => {
+    const connectBtn = event.target.closest(".wifi-connect-btn");
+    if (connectBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      connectWifi();
+      return;
+    }
+    const rescanBtn = event.target.closest(".wifi-rescan-btn");
+    if (rescanBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      rescanWifi();
+      return;
+    }
     const mountBtn = event.target.closest(".usb-mount");
     if (mountBtn) {
       event.preventDefault();
@@ -570,6 +733,11 @@ function bindUsbGrid() {
     confirmUnmount(btn.getAttribute("data-device") || "", btn.getAttribute("data-mountpoint") || "");
   });
   grid.addEventListener("change", (event) => {
+    const select = event.target.closest("#wifi-ssid-select");
+    if (select) {
+      wifiSelectedSsid = select.value;
+      return;
+    }
     const bluetooth = event.target.closest(".bt-toggle-input");
     if (bluetooth) {
       setBluetoothPower(bluetooth.checked, bluetooth);
@@ -737,4 +905,8 @@ renderClock();
 setInterval(renderClock, 1000);
 initTheme();
 loadDashboard();
+syncAdminSession();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) syncAdminSession();
+});
 setInterval(() => loadDashboard(false), 30000);

@@ -41,6 +41,7 @@ from .models import (
     RunCommandPayload,
     UnmountPayload,
     VisibilityPayload,
+    WiFiConnectPayload,
     WiFiPowerPayload,
 )
 from .seed import bootstrap
@@ -61,6 +62,7 @@ ICON_DIR = DATA_DIR / "icons"
 SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 COMMAND_TIMEOUT_SECONDS = 60
 COMMAND_OUTPUT_LIMIT = 8000
+WIFI_INTERFACE = "wlan0"
 
 logger = logging.getLogger(__name__)
 
@@ -730,6 +732,80 @@ def set_wifi_power_endpoint(payload: WiFiPowerPayload, _: str = Depends(require_
         "enabled": payload.enabled,
         "message": message or f"Wi-Fi turned {'on' if payload.enabled else 'off'}",
     }
+
+
+def get_wifi_info() -> dict[str, Any]:
+    from .serverinfo import collect_wifi
+
+    return collect_wifi()
+
+
+def _nmcli_result(args: list[str], timeout: int = 60):
+    import subprocess
+
+    try:
+        return _host_run(["nmcli", *args], timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Wi-Fi command timed out.") from exc
+
+
+def _wifi_command_error(result, fallback: str) -> str:
+    if result is None:
+        return fallback
+    output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
+    return output or fallback
+
+
+def _require_nmcli(args: list[str], timeout: int = 60, fallback: str = "Wi-Fi command failed."):
+    result = _nmcli_result(args, timeout=timeout)
+    if result is None or result.returncode != 0:
+        raise HTTPException(status_code=400, detail=_wifi_command_error(result, fallback))
+    return result
+
+
+@app.post("/api/admin/wifi/rescan")
+def rescan_wifi(_: str = Depends(require_admin)) -> dict[str, Any]:
+    from .serverinfo import invalidate_wifi_cache, record_wifi_activity
+
+    _require_nmcli(
+        ["device", "wifi", "list", "--rescan", "yes"],
+        timeout=60,
+        fallback="Wi-Fi rescan failed.",
+    )
+    invalidate_wifi_cache()
+    record_wifi_activity()
+    return {"ok": True, "wifi": get_wifi_info()}
+
+
+@app.post("/api/admin/wifi/connect")
+def connect_wifi(payload: WiFiConnectPayload, _: str = Depends(require_admin)) -> dict[str, Any]:
+    from .serverinfo import invalidate_wifi_cache, record_wifi_activity
+
+    _require_nmcli(["radio", "wifi", "on"], timeout=20, fallback="Could not enable Wi-Fi.")
+    ssid = payload.ssid
+    if payload.password is not None:
+        result = _nmcli_result(
+            ["device", "wifi", "connect", ssid, "password", payload.password, "ifname", WIFI_INTERFACE],
+            timeout=75,
+        )
+    else:
+        try:
+            result = _nmcli_result(["connection", "up", ssid], timeout=75)
+        except HTTPException:
+            result = None
+        if result is None or result.returncode != 0:
+            result = _nmcli_result(
+                ["device", "wifi", "connect", ssid, "ifname", WIFI_INTERFACE],
+                timeout=75,
+            )
+    if result is None or result.returncode != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=_wifi_command_error(result, f"Could not connect to {ssid}."),
+        )
+    invalidate_wifi_cache()
+    record_wifi_activity()
+    return {"ok": True, "wifi": get_wifi_info()}
 
 
 @app.get("/api/admin/apps")

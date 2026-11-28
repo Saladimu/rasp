@@ -829,6 +829,104 @@ def _wifi_connection_info(interface: str) -> dict[str, str]:
     return info
 
 
+def _split_nmcli_fields(line: str) -> list[str]:
+    fields: list[str] = []
+    current = ""
+    escaped = False
+    for char in line:
+        if escaped:
+            current += char
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":":
+            fields.append(current)
+            current = ""
+        else:
+            current += char
+    if escaped:
+        current += "\\"
+    fields.append(current)
+    return fields
+
+
+def _wifi_saved_networks() -> list[str]:
+    text = _host_command(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]) or ""
+    names: list[str] = []
+    for line in text.splitlines():
+        fields = _split_nmcli_fields(line)
+        if len(fields) < 2 or fields[-1].strip() != "802-11-wireless":
+            continue
+        name = ":".join(fields[:-1]).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _wifi_visible_networks() -> dict[str, int]:
+    text = (
+        _host_command(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL", "device", "wifi", "list", "--rescan", "no"]
+        )
+        or ""
+    )
+    visible: dict[str, int] = {}
+    for line in text.splitlines():
+        fields = _split_nmcli_fields(line)
+        if len(fields) < 2:
+            continue
+        ssid = ":".join(fields[:-1]).strip()
+        if not ssid:
+            continue
+        signal = fields[-1].strip()
+        if not signal.isdigit():
+            continue
+        visible[ssid] = int(signal)
+    return visible
+
+
+def _wifi_networks(active_ssid: str) -> list[dict[str, Any]]:
+    saved = set(_wifi_saved_networks())
+    visible = _wifi_visible_networks()
+    networks: dict[str, dict[str, Any]] = {}
+    for ssid in saved:
+        networks[ssid] = {
+            "ssid": ssid,
+            "signal": visible.get(ssid, 0),
+            "saved": True,
+            "active": bool(active_ssid) and ssid == active_ssid,
+        }
+    for ssid, signal in visible.items():
+        if ssid in networks:
+            continue
+        networks[ssid] = {
+            "ssid": ssid,
+            "signal": signal,
+            "saved": False,
+            "active": bool(active_ssid) and ssid == active_ssid,
+        }
+    if active_ssid and active_ssid not in networks:
+        networks[active_ssid] = {
+            "ssid": active_ssid,
+            "signal": 0,
+            "saved": active_ssid in saved,
+            "active": True,
+        }
+    return sorted(
+        networks.values(),
+        key=lambda item: (
+            0 if item["active"] else 1 if item["saved"] else 2,
+            -item["signal"],
+            item["ssid"].lower(),
+        ),
+    )
+
+
+def invalidate_wifi_cache() -> None:
+    _WIFI_CACHE["data"] = None
+    _WIFI_CACHE["ts"] = 0.0
+
+
 def collect_wifi() -> dict[str, Any]:
     now = time.monotonic()
     cached = _WIFI_CACHE["data"]
@@ -837,12 +935,14 @@ def collect_wifi() -> dict[str, Any]:
 
     info: dict[str, Any] = {
         "available": False,
+        "enabled": False,
         "powered": False,
         "interface": "",
         "ssid": "",
         "signal": "",
         "ip": "",
         "backend": "",
+        "networks": [],
         "message": _WIFI_UNAVAILABLE_MESSAGE,
     }
     device = _parse_nmcli_wifi_device(
@@ -857,6 +957,7 @@ def collect_wifi() -> dict[str, Any]:
         info.update(
             {
                 "available": True,
+                "enabled": powered,
                 "powered": powered,
                 "interface": interface,
                 "backend": backend,
@@ -867,6 +968,7 @@ def collect_wifi() -> dict[str, Any]:
             info.update(
                 {key: value for key, value in _wifi_connection_info(interface).items() if value}
             )
+        info["networks"] = _wifi_networks(info["ssid"])
     else:
         info["message"] = "No wireless interface found."
     _WIFI_CACHE["data"] = info
@@ -883,8 +985,7 @@ def set_wifi_power(enabled: bool) -> tuple[bool, str]:
     else:
         args = ["rfkill", "unblock" if enabled else "block", "wifi"]
     result = _host_command_result(args, timeout=10)
-    _WIFI_CACHE["data"] = None
-    _WIFI_CACHE["ts"] = 0.0
+    invalidate_wifi_cache()
     if result is None:
         return False, _WIFI_UNAVAILABLE_MESSAGE
     output = f"{result.stdout or ''}\n{result.stderr or ''}".strip()

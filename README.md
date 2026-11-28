@@ -158,6 +158,8 @@ Admin (session cookie required):
 - `POST /api/usb/unmount`
 - `POST /api/bluetooth/power`
 - `POST /api/wifi/power`
+- `POST /api/admin/wifi/rescan`
+- `POST /api/admin/wifi/connect`
 - `POST /api/admin/icons`
 
 Mutating admin requests must send header `X-CSRF-Token` matching the `dashboard_csrf` cookie.
