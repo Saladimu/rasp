@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -133,6 +133,28 @@ def in_quiet_hours(cfg: dict[str, Any], now: datetime | None = None) -> bool:
     return current >= start or current < end
 
 
+def format_alert_time(value: str, tz_name: str | None) -> str:
+    """Render a UTC timestamp in the configured alert timezone."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+        zone = tz.key
+    except Exception:
+        tz = timezone.utc
+        zone = "UTC"
+    local = parsed.astimezone(tz)
+    offset = local.utcoffset() or timedelta(0)
+    total_minutes = abs(int(offset.total_seconds())) // 60
+    sign = "+" if offset >= timedelta(0) else "-"
+    offset_text = f"{sign}{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+    return f"{local.strftime('%Y-%m-%d %H:%M:%S')} {offset_text} ({zone})"
+
+
 def _state_map(app_ids: list[int]) -> dict[int, dict[str, Any]]:
     if not app_ids:
         return {}
@@ -215,8 +237,9 @@ async def send_alert(cfg: dict[str, Any], event: str, name: str, item: dict[str,
     status = item.get("status") or "unknown"
     message = item.get("message") or ""
     checked = item.get("last_checked") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    checked_local = format_alert_time(checked, cfg.get("timezone"))
     title = "Service recovered" if event == "recovered" else "Service down"
-    text = f"{title}: {name}\nStatus: {status}\n{message}\nChecked: {checked}"
+    text = f"{title}: {name}\nStatus: {status}\n{message}\nChecked: {checked_local}"
     payload = {
         "event": event,
         "name": name,

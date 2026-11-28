@@ -180,6 +180,7 @@ Configure alerts in Admin > Down Alerts, or with environment variables:
 - Webhook: HTTPS URL only, same public-host rules as website health checks
 - `ALERT_FAIL_THRESHOLD` consecutive offline checks before a down alert (default 2)
 - Quiet hours use `ALERT_QUIET_START` / `ALERT_QUIET_END` as `HH:MM` in `ALERT_TIMEZONE`
+- Alert messages show the check time in `ALERT_TIMEZONE`
 
 A recovery message is sent when a previously down service comes back online. Use Send Test after saving.
 
